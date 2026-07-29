@@ -1,0 +1,53 @@
+{# Rendered from profiles/openclaw.toml at bake time by the deputyos role.
+   Variables (set in tasks/profile-openclaw.yml or via Packer extra_vars):
+     openclaw_install_root  e.g. /opt/deputyos/profiles/openclaw
+     openclaw_data_dir      e.g. /home/agent/.openclaw
+     openclaw_entrypoint    e.g. openclaw onboard --daemon
+     openclaw_unit_name     e.g. openclaw-gateway.service
+   The hardening block below is the deputyOS systemd baseline; touch with care.
+   AppArmor confinement is enforced separately via /etc/apparmor.d/deputyos.openclaw
+   which binds to {{ openclaw_install_root }}/node_modules/.bin/openclaw. #}
+[Unit]
+Description=OpenClaw gateway (deputyOS)
+Documentation=https://github.com/openclaw/openclaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=deputyos-workloads.slice
+User=agent
+Group=agent
+WorkingDirectory={{ openclaw_data_dir }}
+EnvironmentFile=-/etc/deputyos/secrets.env
+ExecStart={{ openclaw_install_root }}/node_modules/.bin/{{ openclaw_entrypoint }}
+Restart=always
+RestartSec=5
+
+# Hardening — see docs/09-security.md.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ openclaw_data_dir }} /etc/deputyos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+
+# AppArmor profile is loaded by the apparmor.service unit; attachment is by
+# the binary path declared in /etc/apparmor.d/deputyos.openclaw.
+
+[Install]
+WantedBy=multi-user.target

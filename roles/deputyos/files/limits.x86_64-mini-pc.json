@@ -1,0 +1,40 @@
+{
+  "_comment": "Per-target limits for x86_64-mini-pc (Beelink / MeLE / NUC class). Copied to /etc/deputyos/limits.json at bake time. Schema in deputyctl/src/limits.rs. See docs/14-limitations.md \u00a7'x86_64-mini-pc'.",
+  "target": "x86_64-mini-pc",
+  "tier": "high",
+  "ram_mb": 16384,
+  "ram_class": "high",
+  "storage_class": "nvme",
+  "capabilities": {
+    "local_llm": true,
+    "voice_wake_word": true,
+    "voice_tts": true,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord",
+      "whatsapp-cloud-webhook"
+    ],
+    "channels_disabled_by_ram": []
+  },
+  "limitations": [
+    {
+      "id": "no-discrete-gpu-tooling",
+      "reason": "NVIDIA / AMD discrete-GPU tooling (CUDA, ROCm) not bundled; mini-PC SKUs don't ship with discrete GPUs",
+      "unblock": "build a custom image with the discrete-GPU stack you need (docs/15-local-build.md)"
+    },
+    {
+      "id": "openvino-only-npu",
+      "reason": "iGPU acceleration via Intel OpenVINO only \u2014 covers Beelink/MeLE/NUC silicon; AMD/NVIDIA NPUs not bundled",
+      "unblock": "sideload the runtime for your accelerator (see docs/12-bundled-software.md \u00a7Acceleration)"
+    },
+    {
+      "id": "llm-7b-unsupported",
+      "reason": "3B local LLM runs at workable speed; 7B is feasible but we ship no quality SLA for it",
+      "unblock": "use a cloud provider for 7B+ workloads, or accept best-effort"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

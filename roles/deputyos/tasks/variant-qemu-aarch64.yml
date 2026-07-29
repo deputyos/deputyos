@@ -1,0 +1,51 @@
+---
+# QEMU aarch64 variant — the CI smoke-test target. Uses the Debian 12
+# bookworm cloud image as the base. Most heavy lifting is in
+# security-baseline.yml; this file is for QEMU-specific tunings.
+#
+# Reference: docs/03-image-builds.md §"Per-target tuning highlights".
+
+- name: Set qemu-aarch64 facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 4096
+    deputyos_target_storage_class: "ssd"
+
+- name: Install qemu-guest-agent
+  ansible.builtin.apt:
+    name: qemu-guest-agent
+    state: present
+
+- name: Enable qemu-guest-agent service
+  ansible.builtin.service:
+    name: qemu-guest-agent
+    enabled: true
+
+- name: Enable serial getty on ttyAMA0
+  # Headless QEMU smoke + first-boot wizard need a serial console.
+  ansible.builtin.systemd:
+    name: serial-getty@ttyAMA0.service
+    enabled: true
+    daemon_reload: true
+
+- name: Verify deputyctl is on PATH
+  # Defensive — security-baseline.yml installs it; this just asserts the
+  # smoke harness will find it. Not a state change.
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"
+
+- name: Ensure cloud-init is present
+  # Debian cloud images ship cloud-init; this is belt-and-braces so a
+  # build against a non-cloud base still works.
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present

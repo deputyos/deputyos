@@ -1,0 +1,19 @@
+[Unit]
+Description=deputyOS network egress policy re-applier
+Documentation=https://docs.deputyos.com/how-to/operate/egress-whitelist/
+After=network-online.target nftables.service
+Before=deputywizard.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Re-render /etc/nftables.conf from /etc/deputyos/network-policy.json and reload.
+# The wrapper skips apply in `open` mode so ufw's inbound default-deny on a
+# connected image is not wiped by the generated `flush ruleset`; whitelist/
+# airgap re-apply (and re-pin DNS for whitelist) on every boot.
+ExecStart=/usr/local/lib/deputyos/deputyos-network-apply.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

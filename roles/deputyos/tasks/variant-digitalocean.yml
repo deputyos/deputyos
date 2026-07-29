@@ -1,0 +1,65 @@
+---
+# DigitalOcean variant — full Packer build → DO snapshot → 1-Click app.
+#
+# Reference:
+#   docs/03-image-builds.md   §"Per-target tuning highlights" (DO column).
+#   docs/14-limitations.md    §"digitalocean" (no audio; A/B via snapshot
+#                              rotation; bandwidth costs apply).
+#
+# Notes on what's intentionally absent:
+#   * No zram (per docs/03 — DO droplets pay for swap on block storage,
+#     and the kernel's memory pressure path is well-tuned for cloud).
+#   * No swapfile (DO billing prefers explicit volumes for ballast disk).
+#   * No A/B partitions — rollback is via DO snapshot rotation. The image
+#     is a single-slot artefact; deputyctl's update flow on this target
+#     creates a new snapshot rather than flipping a slot. (That's M4 work;
+#     this variant just lays the groundwork.)
+#
+# Cloud-init: DigitalOcean injects user-data + SSH project keys at droplet
+# creation time. We rely on the stock cloud-init that already ships in the
+# DO base image; this variant doesn't paper over it.
+
+- name: Set digitalocean facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 4096
+    deputyos_target_storage_class: "block"
+    deputyos_cloud: "digitalocean"
+
+- name: Ensure cloud-init is present
+  # DO base image ships it; belt-and-braces for forks rebuilding off a
+  # non-cloud base.
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present
+
+- name: Install do-agent (DigitalOcean monitoring agent)
+  # do-agent is the lightweight metrics shipper DO uses for the droplet
+  # graphs panel. It's a no-op on non-DO hosts (no API endpoint to talk
+  # to), so leaving it installed is safe even if the snapshot is later
+  # imported elsewhere. Failure to install is logged but non-fatal — the
+  # do-agent apt repo isn't always reachable from CI builders.
+  ansible.builtin.apt:
+    name: do-agent
+    state: present
+  failed_when: false
+  register: deputyos_do_agent_install
+
+- name: Note do-agent install result
+  ansible.builtin.debug:
+    msg: >-
+      do-agent install: {{ 'ok' if deputyos_do_agent_install.failed | default(false) == false
+      else 'skipped (apt repo unreachable; install via snapshot post-boot)' }}
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"

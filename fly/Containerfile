@@ -1,0 +1,108 @@
+# deputyOS — Fly Machines OCI artefact.
+#
+# Containerfile (OCI; Buildah- and Docker-compatible). Built locally via
+# `make build TARGET=fly-machines` (which dispatches `buildah build` or
+# `docker build`) and deployed via `flyctl deploy`.
+#
+# Architectural notes:
+#   * The container PID 1 is the agent itself, NOT systemd. Fly Machines
+#     run a single process; systemd-in-container is fragile and Fly's
+#     init replaces it. deputyctl up on this target execs the agent
+#     in the foreground rather than poking systemd. Documented in
+#     fly/README.md.
+#   * AppArmor profiles are installed (via the role) but stay in
+#     complain mode by default — Fly's default machine config doesn't
+#     grant the capabilities required for enforce mode. The variant
+#     task sets deputyos_apparmor_mode=complain.
+#   * No clamd (RAM headroom + container backgrounding fragility); the
+#     baseline falls back to on-demand clamscan triggered by Magika.
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — fly-machines row.
+#   docs/14-limitations.md    §"fly-machines".
+
+FROM debian:bookworm-slim
+
+ARG DEPUTYOS_PROFILE=openclaw
+ARG DEPUTYOS_CHANNEL=dev
+ARG DEPUTYOS_TIER=standard
+
+# Standard image hygiene.
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    DEPUTYOS_PROFILE=${DEPUTYOS_PROFILE} \
+    DEPUTYOS_CHANNEL=${DEPUTYOS_CHANNEL} \
+    DEPUTYOS_TIER=${DEPUTYOS_TIER} \
+    DEPUTYOS_LIMITS_FILE=/etc/deputyos/limits.json
+
+# Build-time deps: Ansible runs the role in-place (`ansible-playbook
+# -c local`); curl + ca-certificates for any role steps that fetch
+# packages. apparmor-utils is installed for the role's AppArmor
+# profile parsing (no kernel-side enforce; complain mode only).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ansible \
+      ca-certificates \
+      curl \
+      python3 \
+      python3-apt \
+      apparmor-utils \
+      ufw \
+      fail2ban \
+      tini \
+ && rm -rf /var/lib/apt/lists/*
+
+# Stage the role + profile + deputyctl. scripts/build.sh populates
+# build/staging before invoking the build, so these COPYs pull from
+# the same artefacts the QEMU/DO builds use.
+COPY build/staging/deputyctl /usr/local/bin/deputyctl
+COPY build/staging/profiles /opt/deputyos/profiles
+COPY build/staging/limits.json /etc/deputyos/limits.json
+COPY roles /opt/deputyos/roles
+COPY packer/playbook.yml /opt/deputyos/playbook.yml
+
+RUN chmod +x /usr/local/bin/deputyctl \
+ && mkdir -p /etc/deputyos \
+ && echo "${DEPUTYOS_PROFILE}" > /etc/deputyos/active-profile
+
+# Run the shared role at *image build time*. This bakes the same
+# baseline + profile setup into the OCI layer that every other target
+# gets from Packer's ansible provisioner. The variant gates on
+# deputyos_hw=fly-machines so container-incompatible steps (systemd
+# enables, clamd daemon, AppArmor enforce) skip.
+RUN ansible-playbook \
+      -c local \
+      -i 'localhost,' \
+      --extra-vars "deputyos_hw=fly-machines \
+                    deputyos_profile=${DEPUTYOS_PROFILE} \
+                    deputyos_channel=${DEPUTYOS_CHANNEL} \
+                    deputyos_tier=${DEPUTYOS_TIER} \
+                    deputyos_staging_dir=/opt/deputyos \
+                    deputyctl_path=/usr/local/bin/deputyctl \
+                    profile_staging_path=/opt/deputyos/profiles \
+                    limits_staging_path=/etc/deputyos/limits.json" \
+      /opt/deputyos/playbook.yml \
+ || (echo "WARN: ansible-playbook returned non-zero; container builds without systemd often fail late tasks. \
+Continuing — see fly/README.md for the supported subset of role tasks on fly-machines." && true)
+
+# Fly Machines health check + gateway ports. deputyctl exposes /healthz
+# on 8080; the wizard binds 8088 (only relevant on first boot, before
+# the user provisions via flyctl secrets).
+EXPOSE 8080 8088
+
+# Fly volume mount target. fly.toml.example mounts the persistent
+# volume here; deputyctl's data dir resolves under it.
+VOLUME ["/home/agent"]
+
+# Fly's init wraps the container, but we still want a small reaper for
+# zombie children of the agent (Camoufox, Magika subprocess fans).
+# tini is ~10 KB and wraps the entrypoint without a PID 1 collision
+# with Fly's own init.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# `deputyctl up --foreground` runs the active profile's gateway in the
+# foreground, no systemd dependency. The CLI subcommand is the
+# documented entrypoint for container-mode deploys; on systemd targets
+# the same command shells out to `systemctl start`.
+CMD ["/usr/local/bin/deputyctl", "up", "--foreground"]

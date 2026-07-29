@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for signed deputyOS updates daily
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1d
+RandomizedDelaySec=45min
+Persistent=true
+Unit=deputyos-update-cycle.service
+
+[Install]
+WantedBy=timers.target

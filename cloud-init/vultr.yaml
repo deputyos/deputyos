@@ -1,0 +1,80 @@
+#cloud-config
+# deputyOS — Vultr cloud-init recipe.
+#
+# Paste this YAML into the "Startup Script" field at instance creation
+# (Type: cloud-init / yaml). On first boot, cloud-init fetches the
+# deputyOS bundle, runs the Ansible role with deputyos_hw=vultr, and
+# starts the gateway service.
+#
+# Recommended instance type:
+#   * VHF-1c-2gb (High Frequency, 1 vCPU, 2 GB RAM, 64 GB NVMe) — the
+#     realistic floor; matches our limits.vultr.json sizing.
+#   * VC2-2c-4gb (4 GB) — recommended if you plan to run discord or
+#     more than two channels concurrently.
+# 1 GB tiers (VC2-1c-1gb) are below the deputyOS minimum.
+#
+# Placeholders:
+#   <<<USER_SSH_PUBKEY>>>      — your SSH public key (admin user).
+#   https://cdn.deputyos.com
+#                              — deputyOS distribution base URL; filled in
+#                                from the production CDN. See
+#                                cloud-init/README.md.
+#
+# References:
+#   docs/03-image-builds.md   §"build matrix" — vultr row.
+#   docs/14-limitations.md    §"hetzner / vultr / linode".
+---
+hostname: deputyos
+timezone: UTC
+
+disable_root: true
+ssh_pwauth: false
+
+users:
+  - name: agent
+    sudo: false
+    shell: /bin/bash
+    homedir: /home/agent
+    lock_passwd: true
+  - name: admin
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - <<<USER_SSH_PUBKEY>>>
+
+write_files:
+  - path: /etc/deputyos/active-profile
+    content: openclaw
+    owner: root:root
+    permissions: '0644'
+  - path: /etc/deputyos/cloud-init-target
+    content: vultr
+    owner: root:root
+    permissions: '0644'
+
+package_update: true
+package_upgrade: false
+packages:
+  - curl
+  - ca-certificates
+  - python3
+  - python3-apt
+  - cloud-init
+
+runcmd:
+  - [bash, -c, "curl -fsSL https://cdn.deputyos.com/install-cloud.sh \
+        | bash -s -- --hw=vultr --profile=openclaw --channel=stable"]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, openclaw-gateway.service]
+
+# Vultr-specific notes:
+#   * Vultr exposes metadata at 169.254.169.254 in EC2-compat mode;
+#     cloud-init auto-detects.
+#   * On the 2 GB tier, clamd is force-disabled (RAM headroom). Daily
+#     on-demand clamscan via Magika hints replaces it.
+#   * Vultr's "Cloud Compute" (VC2) and "High Frequency" (VHF) shapes
+#     are both supported. Block Storage volumes for backups are an
+#     opt-in extra; deputyctl's B2/R2 backup path is preferred.
+#   * No audio device; voice features auto-disable per the limits file.

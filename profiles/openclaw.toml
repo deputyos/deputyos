@@ -1,0 +1,80 @@
+# OpenClaw profile manifest.
+# Read by `deputyctl` at runtime; consumed by the image build pipeline at bake time.
+# This file describes what is *already in the image* — there is no install step at boot.
+
+[profile]
+id              = "openclaw"
+display_name    = "OpenClaw"
+upstream_repo   = "openclaw/openclaw"
+release_channel = "stable"        # stable | beta — controls the release-tracker, not first boot
+min_ram_mb      = 4096            # wizard warns if device RAM is below this
+pinned_version  = "2026.4.25"     # what is baked into the current image — bumped by the tracker bot
+
+[paths]
+install_root    = "/opt/deputyos/profiles/openclaw"
+data_dir        = "/home/agent/.openclaw"
+binary          = "/opt/deputyos/profiles/openclaw/node_modules/.bin/openclaw"
+
+[runtime]
+# Declared so `deputyctl doctor` can verify versions, not so anything is installed.
+language        = "node"
+node_version    = "24"
+package_manager = "npm"
+extra_apt       = []              # baked into the image, not installed at boot
+
+[service]
+unit            = "openclaw-gateway.service"
+entrypoint      = "openclaw onboard --daemon"
+ports           = [8080, 8443]
+
+[health]
+http_check      = "http://127.0.0.1:8080/healthz"
+journal_unit    = "openclaw-gateway.service"
+startup_grace_s = 30
+
+[apparmor]
+profile         = "/etc/apparmor.d/deputyos.openclaw"
+
+[wizard]
+# Order in which the wizard collects answers for this profile.
+prompts = [
+  "model_provider",
+  "channels",
+  "gateway_allowlist",
+  "backup_destination",
+]
+
+[channels]
+# Channels OpenClaw can serve. The wizard asks the user which to enable; ufw rules and
+# AppArmor mediations are tightened to only the chosen subset.
+supported = [
+  "telegram", "slack", "discord", "whatsapp", "signal", "imessage", "bluebubbles",
+  "irc", "matrix", "feishu", "line", "mattermost", "nextcloud-talk", "nostr",
+  "synology-chat", "tlon", "twitch", "zalo", "wechat", "qq", "google-chat",
+  "microsoft-teams", "webchat",
+]
+
+[upgrade]
+# When the release tracker sees a new upstream tag, the build pipeline produces a new image
+# rev. The user applies it via `deputyctl update`; data_dir is preserved across updates.
+preserve_dirs   = ["~/.openclaw"]
+post_upgrade_hooks = ["deputyctl doctor"]
+
+[egress]
+# Hostnames this profile reaches when network mode is "whitelist".
+# The wizard seeds the allow-list from these defaults.
+default_allow_hosts = [
+    "api.openai.com",
+    "api.anthropic.com",
+    "openrouter.ai",
+    "api.telegram.org",
+    "gateway.discord.gg",
+    "slack.com",
+    "api.signal.org",
+]
+
+
+# M4.5 Lane F: on an air-gapped build (AIRGAP=1), the wizard pre-selects this
+# local LLM provider so the baked LFM2 is chosen automatically without an API key.
+[airgap]
+default_provider = "local-llamacpp-airgap"

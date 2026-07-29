@@ -1,0 +1,14 @@
+{# ufw application profile. The Ansible tasks in security-baseline.yml
+   set the default-deny policy and allow specific ports; this file just
+   names the deputyOS-shipped service ports so an operator running
+   `ufw app list` sees readable names. The wizard binds 8088 to localhost
+   only — we still register it here for documentation. #}
+[deputyos-wizard]
+title=deputyOS first-boot wizard
+description=Axum HTMX wizard on port 8088 (lo only)
+ports=8088/tcp
+
+[deputyos-ssh]
+title=deputyOS SSH
+description=Hardened OpenSSH (key-only)
+ports=22/tcp

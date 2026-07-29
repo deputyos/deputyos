@@ -1,0 +1,50 @@
+[package]
+name = "deputyctl"
+version = "0.1.0"
+description = "Management CLI for deputyOS appliance images."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "deputyctl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+deputyd = { package = "deputyd-protocol", path = "../deputyd-protocol" }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+url = "2"
+# ureq carries optional rustls so `model test` can hit https provider endpoints;
+# `tls` feature is small (rustls + ring) and avoids OpenSSL system deps.
+ureq = { version = "2.10", default-features = false, features = ["tls", "json"] }
+# Masked password input for `model set` interactive flow.
+rpassword = "7.3"
+# SHA-256 to derive the age identity from the cloud backup token (M8). A vetted
+# hash is required here: a subtly-wrong hand-rolled SHA would still round-trip
+# (both sides derive the same key) but could silently lose entropy. See
+# `src/agekey.rs`.
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "0.38", features = ["fs", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+httpmock = "0.7"
+
+[lints]
+workspace = true

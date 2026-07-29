@@ -1,0 +1,101 @@
+#cloud-config
+# deputyOS — Hetzner Cloud cloud-init recipe.
+#
+# Paste this YAML into the "User-Data" field when creating a Hetzner
+# Cloud server (Server creation → Cloud config). On first boot,
+# cloud-init fetches the deputyOS bundle, runs the Ansible role with
+# deputyos_hw=hetzner-cloud, and starts the gateway service.
+#
+# Recommended instance type:
+#   * CX22 (Arm Ampere, 2 vCPU, 4 GB RAM, 40 GB disk) — Hetzner's cheapest
+#     Arm shape; matches our limits.hetzner-cloud.json sizing.
+#   * CX21 (x86, 2 vCPU, 4 GB RAM, 40 GB disk) — equivalent x86 shape.
+# 1 GB tiers (CX11 etc.) are below the deputyOS minimum.
+#
+# Placeholders:
+#   <<<USER_SSH_PUBKEY>>>      — the user's ssh public key for the admin
+#                                account. Hetzner Cloud also propagates
+#                                project-level SSH keys automatically; if
+#                                you rely on those alone, leave this as is.
+#   https://cdn.deputyos.com
+#                              — the deputyOS distribution base URL. This
+#                                is served from the production CDN
+#                                (see cloud-init/README.md). Until then,
+#                                this recipe is a contract, not a runnable
+#                                first-boot script.
+#
+# References:
+#   docs/03-image-builds.md   §"build matrix" — hetzner-cloud row.
+#   docs/14-limitations.md    §"hetzner / vultr / linode".
+---
+hostname: deputyos
+timezone: UTC
+
+# Lock down the default Debian/Ubuntu user. cloud-init will create our
+# own admin + agent users. Hetzner's stock Ubuntu image leaves the root
+# account password-less and SSH-key-only; we keep that behaviour.
+disable_root: true
+ssh_pwauth: false
+
+users:
+  - name: agent
+    # Unprivileged service account. The agent runs under this UID.
+    # No sudo, no shell login normally; matches the baked-image profile.
+    sudo: false
+    shell: /bin/bash
+    homedir: /home/agent
+    lock_passwd: true
+  - name: admin
+    # Operator account for break-glass + initial setup. Replace the
+    # placeholder pubkey below; Hetzner's project-level SSH keys are also
+    # injected automatically into this user.
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - <<<USER_SSH_PUBKEY>>>
+
+write_files:
+  - path: /etc/deputyos/active-profile
+    # Selects which profile bake the role runs. Change to "hermes" for
+    # the Hermes profile.
+    content: openclaw
+    owner: root:root
+    permissions: '0644'
+  - path: /etc/deputyos/cloud-init-target
+    # Picked up by the install script to set deputyos_hw without parsing
+    # the recipe filename.
+    content: hetzner-cloud
+    owner: root:root
+    permissions: '0644'
+
+package_update: true
+package_upgrade: false  # full upgrade is the M4 image-rev path; not first-boot
+packages:
+  - curl
+  - ca-certificates
+  - python3
+  - python3-apt
+  - cloud-init
+
+runcmd:
+  # Bootstrap the deputyOS install script. The script is signed; its
+  # signature is verified by the install command before execution. The
+  # M4 CDN ships these artefacts at a stable URL; until then the
+  # placeholder makes the recipe lint-clean but unrunnable on a real
+  # server (intentional — the README explains).
+  - [bash, -c, "curl -fsSL https://cdn.deputyos.com/install-cloud.sh \
+        | bash -s -- --hw=hetzner-cloud --profile=openclaw --channel=stable"]
+  # The install script writes a systemd unit per profile. Enable +
+  # start it so the gateway is reachable immediately at first boot.
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, openclaw-gateway.service]
+
+# Hetzner-specific notes:
+#   * Hetzner Cloud's metadata service is at 169.254.169.254 (cloud-init
+#     auto-detects); no extra config needed.
+#   * Hetzner takes free weekly snapshots if enabled in the project; for
+#     deputyOS data backups use deputyctl's B2/R2 path instead — snapshots
+#     don't capture the rate of conversation churn.
+#   * No audio device; voice features auto-disable per the limits file.

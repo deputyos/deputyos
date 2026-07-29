@@ -1,0 +1,66 @@
+# Managed by deputyos. Rendered from
+# roles/deputyos/templates/deputyos-remote-wizard.service.j2 by
+# tasks/wizard-baseline.yml. Reference: docs/11-roadmap.md §M9.6 and
+# docs/09-security.md §wizard (AccountOwner mode).
+#
+# This is the POST-first-boot counterpart of deputywizard.service. The first-
+# boot unit runs in Token mode and is gated `ConditionPathExists=!wizard-state.json`
+# (stops auto-starting once the wizard completes). THIS unit is gated on the
+# INVERSE — `ConditionPathExists=/var/lib/deputyos/wizard-state.json` — so it
+# activates only after first boot, and stays up permanently to serve the
+# wizard for remote management via the tunnel (AccountOwner JWT auth).
+#
+# Auth: `--account-owner` validates the account owner's RS256 JWT against
+# /etc/deputyos/api-pubkey.pem (baked at build) and matches jwt.sub to this
+# device's account_id (/etc/deputyos/account.json, written by the wizard
+# Account step). If the pubkey or account.json is missing it falls back to
+# Token mode (the in-VM launch token) — remote access is then unavailable
+# but the unit still serves the wizard locally. See deputywizard/src/auth.rs.
+#
+# Same hardening trade-off as the first-boot unit: the wizard runs as root so
+# it can read /etc/deputyos/* and (if needed) re-apply privileged config. This
+# is bounded by the AccountOwner auth gate — only the device's owner (holder
+# of a valid account JWT) gets a session cookie; everyone else gets 401.
+[Unit]
+Description=deputyOS wizard — remote management via tunnel (AccountOwner JWT, M9.6)
+Documentation=https://github.com/dipankarn/deputyOS/blob/main/docs/11-roadmap.md
+After=network-online.target
+Wants=network-online.target
+# Inverse of deputywizard.service: only meaningful once first boot completed
+# (wizard-state.json exists). The two units are mutually exclusive by
+# condition, so only one wizard binds :8088 at a time.
+ConditionPathExists=/var/lib/deputyos/wizard-state.json
+
+[Service]
+Type=simple
+# Root for the same reasons as the first-boot wizard (reads /etc/deputyos,
+# may re-apply privileged config). AccountOwner auth bounds the exposure.
+User=root
+Group=root
+RuntimeDirectory=deputyos
+RuntimeDirectoryMode=0755
+StateDirectory=deputyos
+StateDirectoryMode=0755
+ExecStart=/usr/local/bin/deputywizard serve \
+  --port {{ deputyos_wizard_port }} \
+  --bind {{ deputyos_wizard_bind }} \
+  --account-owner \
+  --production
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/etc/deputyos /etc/hostname /etc/timezone /var/lib/deputyos /run/deputyos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

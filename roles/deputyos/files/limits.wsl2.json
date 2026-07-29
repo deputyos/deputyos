@@ -1,0 +1,62 @@
+{
+  "_comment": "Per-target limits for wsl2. Copied to /etc/deputyos/limits.json at bake time. Schema lives in deputyctl/src/limits.rs. See docs/14-limitations.md \u00a7'wsl2' for the source-of-truth narrative. Note: WSL2 inherits its kernel from Microsoft and its swap from Windows, so the standard 8GB tier is the assumed Windows-host default.",
+  "target": "wsl2",
+  "tier": "standard",
+  "ram_mb": 8192,
+  "ram_class": "standard",
+  "storage_class": "ntfs",
+  "cloud": "wsl2",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": false,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-audio-in-wsl2",
+      "reason": "WSL2 does not pass /dev/snd by default; voice features (wake-word, TTS) require a sound device.",
+      "unblock": "Use rpi5 8GB+ or x86_64-mini-pc for voice; or configure WSL2 audio passthrough manually (out of scope)."
+    },
+    {
+      "id": "no-kernel-customization",
+      "reason": "Microsoft owns the WSL2 kernel; deputyOS cannot tune cmdline, AppArmor cmdline flags, or kernel modules at bake time.",
+      "unblock": "Use a non-WSL2 target (qemu-x86_64, x86_64-mini-pc) when kernel-level isolation is required."
+    },
+    {
+      "id": "no-mdns-on-lan",
+      "reason": "WSL2's NAT'd network does not advertise mDNS to the LAN; deputyos.local resolves only on the same Windows host.",
+      "unblock": "Use the Windows IP-form URL from another device, or expose the wizard via Tailscale Funnel / Cloudflare Tunnel."
+    },
+    {
+      "id": "no-clamav-daemon",
+      "reason": "WSL2's distro-start lifecycle is incompatible with persistent clamd; on-demand clamscan + Magika hint runs instead.",
+      "unblock": "Same coverage on this device; persistent clamd available on rpi5 8GB+ / x86_64-mini-pc."
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "Conservative default \u2014 local LLMs run only when host RAM permits and a GPU is plumbed (which WSL2 does not by default).",
+      "unblock": "Use cloud model providers, or build a custom WSL2 image with NVIDIA GPU passthrough."
+    },
+    {
+      "id": "no-ab-updates",
+      "reason": "WSL2 distros are tarball-imported; there is no A/B partition.",
+      "unblock": "User re-imports the new tarball on update (documented in wsl/README.md)."
+    },
+    {
+      "id": "no-whatsapp-cloud-webhook",
+      "reason": "WhatsApp Cloud webhook RSS exceeds standard tier headroom on shared Windows hosts.",
+      "unblock": "Upgrade to high-RAM tier or use a dedicated rpi5 / x86_64-mini-pc."
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "standard"
+}

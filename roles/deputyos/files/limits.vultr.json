@@ -1,0 +1,53 @@
+{
+  "_comment": "Limits for the vultr cloud-init recipe target. Sized for the realistic floor (VC2-1c-2gb / VHF-1c-2gb, 2 GB RAM). Vultr's 1 GB tier sits below deputyOS minimum; the recipe README recommends 2 GB+. Schema in deputyctl/src/limits.rs.",
+  "target": "vultr",
+  "tier": "standard",
+  "ram_mb": 2048,
+  "ram_class": "low",
+  "storage_class": "block",
+  "cloud": "vultr",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": false,
+    "channels_heavy": [
+      "telegram",
+      "slack"
+    ],
+    "channels_disabled_by_ram": [
+      "discord",
+      "whatsapp-cloud-webhook",
+      "matrix"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-audio",
+      "reason": "Vultr instances have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "no-signed-image",
+      "reason": "We don't ship a signed Vultr snapshot; the cloud-init recipe pulls the deputyOS bundle at first boot",
+      "unblock": "verify the recipe SHA before applying"
+    },
+    {
+      "id": "no-ab-partitions",
+      "reason": "Updates are full re-image cycles (delete + redeploy)",
+      "unblock": "scale up via Vultr API; deputyctl update prints redeploy instructions (M4)"
+    },
+    {
+      "id": "no-clamd",
+      "reason": "2 GB RAM is too tight for clamd's ~900 MB RSS; on-demand clamscan replaces it",
+      "unblock": "scale to 4 GB+ tier and re-enable in deputyctl config"
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'low' (2 GB) far below local-LLM threshold (8 GB)",
+      "unblock": "scale to High Frequency 8 GB+ or use a cloud model provider"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

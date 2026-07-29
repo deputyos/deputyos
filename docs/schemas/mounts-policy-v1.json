@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://www.deputyos.com/schemas/mounts-policy-v1.json",
+  "title": "deputyOS mounts policy",
+  "description": "Schema for /etc/deputyos/mounts-policy.json — the single source of truth for which host folders, removable drives, and network shares the agent can see. Read + mutated by `deputyctl mounts`; materialised at boot by deputyos-mounts.service. Credentials NEVER live here — SMB/CIFS credentials are referenced by name and stored in /etc/deputyos/secrets.env. Schema version 1; bump on breaking changes and mirror in release::Manifest::mounts_policy_schema_version.",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "https://www.deputyos.com/schemas/mounts-policy-v1.json"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Policy schema version. Currently 1."
+    },
+    "host_fs": {
+      "type": "array",
+      "default": [],
+      "description": "Host-filesystem bind mounts (WSL2 /virtiofs / DrvFs / a bare-metal host folder). Every guest_path must live under /mnt/deputyos/ so AppArmor can confine it.",
+      "items": {
+        "type": "object",
+        "required": ["id", "host_path", "guest_path", "mode"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Stable, human-friendly id (e.g. documents, code). Unique across host_fs + network."
+          },
+          "host_path": {
+            "type": "string",
+            "description": "Path on the host (informational; the materialiser bind-mounts it)."
+          },
+          "guest_path": {
+            "type": "string",
+            "pattern": "^/mnt/deputyos/.*",
+            "description": "Path inside the appliance. MUST be under /mnt/deputyos/."
+          },
+          "mode": { "enum": ["ro", "rw"] }
+        }
+      }
+    },
+    "removable": {
+      "type": "object",
+      "description": "Policy for removable drives (USB, SD). Handled by the udev rule + deputyos-mount-removable.sh, not the boot materialiser.",
+      "default": {
+        "enabled": false,
+        "auto_mount": false,
+        "default_mode": "ro",
+        "mount_options_unknown_fs": "nosuid,nodev,noexec"
+      },
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the udev rule reacts to removable-media events at all."
+        },
+        "auto_mount": {
+          "type": "boolean",
+          "description": "If true, mount on insert; else wait for an explicit action."
+        },
+        "default_mode": { "enum": ["ro", "rw"] },
+        "mount_options_unknown_fs": {
+          "type": "string",
+          "description": "Mount options forced for filesystems the appliance does not recognise. Defaults to nosuid,nodev,noexec. crypto_LUKS and empty FSTYPE are refused outright."
+        }
+      }
+    },
+    "network": {
+      "type": "array",
+      "default": [],
+      "description": "Network shares (SMB/CIFS, NFS). Credentials are NOT stored here — for CIFS, put <KEY>=username:password in /etc/deputyos/secrets.env and name the key via credentials_env.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "source", "guest_path", "mode"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "description": "Stable id (e.g. nas-photos). Unique across host_fs + network."
+          },
+          "kind": { "enum": ["cifs", "nfs"] },
+          "source": {
+            "type": "string",
+            "description": "Server path. //nas.lan/photos for cifs, nas.lan:/srv/photos for nfs."
+          },
+          "guest_path": {
+            "type": "string",
+            "pattern": "^/mnt/deputyos/.*",
+            "description": "Path inside the appliance. MUST be under /mnt/deputyos/."
+          },
+          "mode": { "enum": ["ro", "rw"] },
+          "credentials_env": {
+            "type": ["string", "null"],
+            "description": "Name of the env var in /etc/deputyos/secrets.env holding CIFS credentials. NFS usually omits this."
+          }
+        }
+      }
+    }
+  }
+}

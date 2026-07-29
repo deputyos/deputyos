@@ -1,0 +1,171 @@
+---
+# Role-wide defaults. Packer templates override these via extra_vars.
+# See docs/03-image-builds.md §"Architectural lever".
+
+# Hardware target. One of: rpi5, rpi4, arm64-generic, x86_64-mini-pc,
+# wsl2, qemu-aarch64, qemu-x86_64. Empty default forces an explicit choice
+# from the Packer template (failing loudly is better than silently picking).
+deputyos_hw: ""
+
+# Cloud target. One of: digitalocean, oracle-arm, hetzner, fly, "" for bare-metal.
+deputyos_cloud: ""
+
+# Profile id. One of: openclaw, hermes (more in M7).
+deputyos_profile: ""
+
+# Tier (RAM-class bundle). One of: lean, standard, rich.
+# See docs/12-bundled-software.md.
+deputyos_tier: "standard"
+
+# Channel (release-tracker channel). One of: dev, beta, stable.
+deputyos_channel: "dev"
+
+# `check` for immutable VM/container formats (the desktop atomically replaces
+# their base image); use `apply` only on images provisioned with explicit A/B
+# raw/rootfs slot paths and matching bootloader entries.
+deputyos_auto_update_mode: "check"
+
+# Air-gapped build (M4.5). When true:
+# - apt sources point at /opt/deputyos/airgap/apt-mirror/
+# - nftables egress denies everything except RFC1918 + mDNS
+# - /etc/deputyos/network-policy.json declares mode=airgap
+# - tasks/llm-airgap.yml bakes a tier-appropriate LFM2 GGUF
+# Surfaced in deputyctl limits as "airgap: yes".
+deputyos_airgap: false
+
+# Per-target sized facts. variant-*.yml overrides these.
+deputyos_target_ram_mb: 2048
+deputyos_target_storage_class: "ssd"
+
+# ClamAV daemon: only enable on targets with enough RAM headroom.
+# Pi 4 (and other <4GB devices) flips this off in their variant file.
+# See docs/14-limitations.md.
+deputyos_clamav_daemon_enabled: true
+
+# Path on the *Packer host* (not the guest) where scripts/build.sh stages
+# a pre-built deputyctl binary, the active profile.toml, and limits.json.
+# Ansible's `copy:` module reads from these paths and drops them into the
+# guest filesystem. Override per Packer build via extra_vars.
+deputyos_staging_dir: "/tmp/deputyos-staging"
+deputyos_deputyctl_path: "{{ deputyos_staging_dir }}/deputyctl"
+deputyos_profile_staging_path: "{{ deputyos_staging_dir }}/profiles"
+deputyos_limits_staging_path: "{{ deputyos_staging_dir }}/limits.json"
+deputyos_providers_staging_path: "{{ deputyos_staging_dir }}/providers.json"
+
+# DeputyOS install layout (rendered into many places — keep DRY).
+deputyos_etc_dir: "/etc/deputyos"
+deputyos_secrets_path: "{{ deputyos_etc_dir }}/secrets.env"
+deputyos_active_profile_path: "{{ deputyos_etc_dir }}/active-profile"
+deputyos_profiles_dir: "{{ deputyos_etc_dir }}/profiles"
+deputyos_limits_path: "{{ deputyos_etc_dir }}/limits.json"
+deputyos_providers_path: "{{ deputyos_etc_dir }}/providers.json"
+
+# ---- Phase 5 Lane B: bake-side polish (wizard, mDNS, hooks) ----
+
+# deputywizard binary path on the Packer host (mirrors deputyos_deputyctl_path).
+# scripts/build.sh stages it next to deputyctl.
+deputyos_deputywizard_path: "{{ deputyos_staging_dir }}/deputywizard"
+
+# Resident lifecycle/resource agent baked into every official image. Host runtimes
+# invoke its root-owned Unix-socket protocol through QEMU Guest Agent, UTM
+# Guest Agent, or `wsl -d`; it never exposes a management TCP port.
+deputyos_image_kind: "{{ lookup('env', 'DEPUTYOS_IMAGE_KIND') | default('official', true) }}"
+deputyos_core_staging_dir: "{{ deputyos_staging_dir }}/core"
+
+# API RSA public key (PEM) used by the wizard's AccountOwner auth (M9.3/M9.6)
+# to validate the account owner's JWT signature. Staged by the build pipeline
+# from the API's signing keypair (see api-deputyos-com). Baked to
+# /etc/deputyos/api-pubkey.pem (0644 — it's a *public* key, non-secret). If this
+# file isn't staged, the bake skips it and the wizard falls back to Token mode
+# (remote management via the tunnel is unavailable until it's provisioned).
+deputyos_api_pubkey_path: "{{ deputyos_staging_dir }}/api-pubkey.pem"
+deputyos_api_pubkey_dest: "{{ deputyos_etc_dir }}/api-pubkey.pem"
+
+# Minisign public key used by deputyctl and desktop launchers to verify stable
+# release manifests and artefacts. Production release CI stages this from the
+# offline release keypair; dev bakes may omit it and use an explicitly trusted
+# contributor key instead.
+deputyos_release_pubkey_path: "{{ deputyos_staging_dir }}/release-pubkey.minisign"
+deputyos_release_pubkey_dest: "{{ deputyos_etc_dir }}/pubkey.minisign"
+
+# Wizard listen config (production bakes use 0.0.0.0 so LAN clients can
+# reach the first-boot UI; ufw still applies — the security baseline
+# narrows external exposure, mDNS makes it discoverable on link-local).
+# NOTE: ansible-lint's var-naming[no-role-prefix] requires `deputyos_` on
+# all role-scoped vars; the Phase-5 spec called these `deputywizard_port`
+# / `mdns_hostname` / `hooks_dir` / `cloudflared_install` /
+# `tailscale_install` without prefix — we use the prefixed form here
+# and reference these names everywhere in the role.
+deputyos_wizard_port: 8088
+deputyos_wizard_bind: "0.0.0.0"
+
+# mDNS hostname under .local (avahi publishes <mdns_hostname>.local).
+deputyos_mdns_hostname: "deputyos"
+
+# /etc/deputyos/hooks.d directory tree root.
+deputyos_hooks_dir: "{{ deputyos_etc_dir }}/hooks.d"
+
+# Whether to bake the cloudflared / tailscale binaries. Cloud targets
+# typically don't need a tunnel (they already have a public IP) and Fly
+# Machines containers have neither room nor a use-case.
+deputyos_cloudflared_install: true
+deputyos_tailscale_install: true
+
+# Set of hardware targets where mDNS / TTY-QR / tunnels don't make sense.
+# (Variant files set deputyos_cloud later, but networking-baseline runs
+# before them per main.yml ordering, so we gate by hw name directly.)
+deputyos_cloudish_hw:
+  - "digitalocean"
+  - "oracle-arm-free"
+  - "hetzner-cloud"
+  - "vultr"
+  - "linode"
+  - "fly-machines"
+  - "wsl2"
+
+# ---- Phase 7 Lane Voice: on-device wake-word + TTS (M6) ----
+#
+# Voice configuration is OPT-IN. The frozen profile manifests
+# (profiles/openclaw.toml, profiles/hermes.toml) are M0-frozen and
+# do NOT carry a [voice] section; runtime voice config lives in a
+# SEPARATE file at /etc/deputyos/voice.toml rendered from
+# templates/voice.toml.j2 by tasks/voice-baseline.yml.
+#
+# When deputyos_voice_enabled is false the entire voice-baseline task
+# list short-circuits, so non-voice targets (every cloud, wsl2, rpi4,
+# macos-qemu) pay zero baking cost.
+#
+# Per docs/14-limitations.md:
+#   - rpi4: no voice (CPU + RAM)
+#   - rpi5 8GB: tiny.en only
+#   - rpi5 16GB: base.en (small.en thermal-throttles)
+#   - x86_64-mini-pc: small.en
+#   - cloud / wsl2 / macos-qemu: no /dev/snd, voice disabled
+#
+# Reference: docs/11-roadmap.md §M6 Lane A/B/F.
+deputyos_voice_enabled: false
+deputyos_voice_stt_model: "whisper-tiny.en"
+deputyos_voice_tts_voice: "en_US-amy-medium"
+deputyos_voice_audio_device: "default"
+deputyos_voice_wake_word: "agent"
+
+# Hardware targets where voice makes no sense — the role refuses to
+# bake voice assets even if deputyos_voice_enabled=true is set in error.
+# rpi4 is RAM/CPU-bound; cloud + wsl2 + macos-qemu lack /dev/snd or
+# pass-through audio. Keep aligned with docs/14-limitations.md.
+deputyos_no_voice_hw:
+  - "rpi4"
+  - "wsl2"
+  - "macos-qemu"
+  - "digitalocean"
+  - "oracle-arm-free"
+  - "hetzner-cloud"
+  - "vultr"
+  - "linode"
+  - "fly-machines"
+
+# Staging paths on the Packer host. scripts/build.sh's voice-asset
+# stage downloads + verifies into build/staging/voice/ and writes
+# a MANIFEST file listing every artefact + sha256.
+deputyos_voice_staging_dir: "{{ deputyos_staging_dir }}/voice"
+deputyos_voice_install_root: "/opt/deputyos/voice"

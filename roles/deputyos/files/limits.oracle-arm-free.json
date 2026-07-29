@@ -1,0 +1,46 @@
+{
+  "_comment": "Limits for the oracle-arm-free target (Always-Free Ampere A1 aarch64). Default single-instance shape: 1 OCPU / 6 GB. Users running the full 4 OCPU / 24 GB Always-Free quota in one instance get higher RAM at runtime via deputyctl doctor's live probe. Schema in deputyctl/src/limits.rs.",
+  "target": "oracle-arm-free",
+  "tier": "high",
+  "ram_mb": 6144,
+  "ram_class": "standard",
+  "storage_class": "block",
+  "cloud": "oracle",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord",
+      "matrix"
+    ],
+    "channels_disabled_by_ram": []
+  },
+  "limitations": [
+    {
+      "id": "always-free-reclaim",
+      "reason": "Oracle reclaims Always-Free instances after ~7 days of idle (per their published policy). Reclaimed instances lose data unless backed up.",
+      "unblock": "enable the keepalive opt-in in the wizard (M3+); pay for a non-Always-Free shape; or take regular deputyctl backups to B2/R2"
+    },
+    {
+      "id": "no-audio",
+      "reason": "Oracle Cloud instances have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "no-ab-partitions",
+      "reason": "Oracle custom images are single-slot; rollback is via custom-image versioning + snapshot recreate",
+      "unblock": "keep the prior custom-image version pinned in OCI; deputyctl update creates a new image rev"
+    },
+    {
+      "id": "no-local-llm-default-shape",
+      "reason": "Default 1 OCPU / 6 GB single-instance shape sits below comfortable local-LLM headroom; OK for embeddings/rerank only",
+      "unblock": "scale to 4 OCPU / 24 GB single-instance shape (still Always-Free quota); 3B models work, slower than rpi5 short tasks"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "standard"
+}

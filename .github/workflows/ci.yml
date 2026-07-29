@@ -1,0 +1,47 @@
+---
+name: ci
+
+# Hard rule: this workflow is a thin wrapper around `make ci`. No
+# CI-only logic. If you find yourself adding another step, add a Make
+# target instead so contributors run it locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host deps
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y yamllint shellcheck \
+              minisign qemu-system-arm qemu-user-static xz-utils
+          else
+            brew install yamllint shellcheck minisign \
+              qemu xz hashicorp/tap/packer
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ansible.txt
+      - name: Install pinned Ansible toolchain
+        run: |
+          python -m venv "$RUNNER_TEMP/deputyos-ansible"
+          "$RUNNER_TEMP/deputyos-ansible/bin/pip" install -r requirements-ansible.txt
+          echo "$RUNNER_TEMP/deputyos-ansible/bin" >> "$GITHUB_PATH"
+      - name: Doctor
+        run: make doctor || true
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements-ansible.yml
+      - name: CI
+        run: make ci SCAFFOLD_PHASE=1

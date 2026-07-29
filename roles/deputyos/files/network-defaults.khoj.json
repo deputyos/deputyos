@@ -1,0 +1,15 @@
+{
+  "$schema": "https://www.deputyos.com/schemas/network-defaults-v1.json",
+  "profile": "khoj",
+  "mode": "open",
+  "allow_hosts": [
+    "api.openai.com",
+    "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "api.openrouter.ai",
+    "api.telegram.org",
+    "khoj.dev",
+    "pypi.org",
+    "files.pythonhosted.org"
+  ]
+}

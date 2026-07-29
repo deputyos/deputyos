@@ -1,0 +1,64 @@
+# deputyOS — example fly.toml.
+#
+# Copy this to fly.toml in your own repo, edit the app name + region,
+# then run `flyctl launch --copy-config` (or `flyctl deploy` if the
+# app already exists).
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — fly-machines row.
+#   docs/14-limitations.md    §"fly-machines".
+
+# Replace with your own app name. Fly app names are globally unique.
+app = "deputyos-openclaw"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Containerfile"
+  build-args = { DEPUTYOS_PROFILE = "openclaw", DEPUTYOS_CHANNEL = "stable" }
+
+[env]
+  DEPUTYOS_PROFILE = "openclaw"
+  DEPUTYOS_LIMITS_FILE = "/etc/deputyos/limits.json"
+  # /home/agent is the Fly volume mount; deputyctl resolves its data
+  # dir under it. Survives machine restarts; vanishes if the volume
+  # is deleted (see docs/14 §fly-machines).
+  DEPUTYOS_DATA_DIR = "/home/agent/.openclaw"
+
+# Persistent storage. Without this mount, every machine restart loses
+# state. Create the volume once: `flyctl volumes create deputyos_data
+# --size 10 --region iad`.
+[mounts]
+  source      = "deputyos_data"
+  destination = "/home/agent"
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  # Free Machines auto-stop on idle and add several seconds of
+  # cold-start latency. Set min_machines_running = 1 on a paid plan
+  # for low-latency channels (Telegram polling tolerates it; voice
+  # does not — but voice is disabled on fly-machines anyway).
+  min_machines_running = 0
+  processes            = ["app"]
+
+[http_service.concurrency]
+  type       = "connections"
+  hard_limit = 50
+  soft_limit = 25
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout  = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path   = "/healthz"
+
+[[vm]]
+  # 2 GB is the realistic floor for deputyOS (Node + Python + Camoufox).
+  # 1 GB OOMs on the role's first apt-get pass; 256 MB never boots.
+  size      = "shared-cpu-1x"
+  memory    = "2gb"
+  cpu_kind  = "shared"
+  cpus      = 1

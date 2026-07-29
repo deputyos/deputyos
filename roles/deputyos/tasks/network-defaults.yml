@@ -1,0 +1,20 @@
+---
+# Per-profile network-defaults (M5.5).
+#
+# Each profile ships a curated allow-list of hostnames needed for its
+# channels + model providers. The file is baked at /etc/deputyos/network-defaults.json
+# and `deputyctl network mode whitelist` seeds from it when switching to
+# whitelist mode. Users can mutate the list at runtime via `deputyctl network
+# allow add/remove`.
+#
+# The file is never overwritten on update if the user has touched the
+# live policy (network-policy.json's set_at_build_time=false).
+
+- name: Network-defaults | copy per-profile defaults for {{ deputyos_profile }}
+  ansible.builtin.copy:
+    src: "network-defaults.{{ deputyos_profile }}.json"
+    dest: "{{ deputyos_etc_dir }}/network-defaults.json"
+    owner: root
+    group: root
+    mode: "0644"
+  failed_when: false  # OK if no defaults file exists for this profile

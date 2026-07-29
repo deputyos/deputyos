@@ -1,0 +1,21 @@
+---
+# Backup/restore dependencies are baked into every image. Managed snapshots
+# must work unattended after the wizard; first-run package downloads are not
+# an acceptable recovery path.
+
+- name: "Backup: install age and rclone"
+  ansible.builtin.apt:
+    name:
+      - age
+      - rclone
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Backup: create status directory"
+  ansible.builtin.file:
+    path: /var/lib/deputyos
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

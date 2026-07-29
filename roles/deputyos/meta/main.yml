@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  role_name: deputyos
+  author: deputyOS contributors
+  description: >-
+    Provisions an deputyOS appliance image. One role, every target;
+    hardware-specific tuning is gated by `deputyos_hw` and `deputyos_cloud`.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - system
+    - imaging
+    - appliance
+
+dependencies: []

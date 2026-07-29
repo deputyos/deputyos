@@ -1,0 +1,61 @@
+{
+  "_comment": "deputyOS TrueNAS Scale VM template. Maps to TrueNAS Scale's `vm.create` + `vm.device.create` API shape (libvirt-backed, JSON-over-WebSocket). Use README.md in this directory for the click-through path. Defaults: 2 vCPU, 2 GB RAM, OVMF, virtio NIC, virtio-blk disk pointing at a zvol that holds the deputyOS qcow2. Substitute the zpool name (`tank`) below for whatever your SCALE host uses.",
+  "name": "deputyos",
+  "description": "deputyOS personal AI appliance — see https://www.deputyos.com",
+  "vcpus": 2,
+  "cores": 2,
+  "threads": 1,
+  "cpu_mode": "HOST-PASSTHROUGH",
+  "memory": 2048,
+  "bootloader": "UEFI",
+  "machine_type": "q35",
+  "autostart": false,
+  "time": "LOCAL",
+  "shutdown_timeout": 90,
+  "arch_type": null,
+  "hide_from_msr": false,
+  "ensure_display_device": false,
+  "_devices_comment": "TrueNAS Scale models VM devices as a separate collection; the SCALE UI assembles them under the parent VM. The shape below is what `vm.device.create` accepts. Adjust the zvol path to match your zpool.",
+  "devices": [
+    {
+      "dtype": "DISK",
+      "_dtype_comment": "DISK = virtio-blk attached to a zvol. Create the zvol from a qcow2 with: zfs create -V 8G tank/deputyos; qemu-img convert -O raw <qcow2> /dev/zvol/tank/deputyos",
+      "attributes": {
+        "path": "/dev/zvol/tank/deputyos",
+        "type": "VIRTIO",
+        "logical_sectorsize": null,
+        "physical_sectorsize": null
+      },
+      "order": 1001
+    },
+    {
+      "dtype": "NIC",
+      "_dtype_comment": "NIC = virtio bridged to the host's primary interface. Replace `br0` with your bridge if you've renamed it.",
+      "attributes": {
+        "type": "VIRTIO",
+        "mac": null,
+        "nic_attach": "br0",
+        "trust_guest_rx_filters": false
+      },
+      "order": 1002
+    },
+    {
+      "dtype": "DISPLAY",
+      "_dtype_comment": "VNC for first-boot console. deputyOS bakes serial-getty too; SCALE doesn't expose serial-only VMs in the UI today, so VNC is the click-through path.",
+      "attributes": {
+        "type": "SPICE",
+        "bind": "0.0.0.0",
+        "port": null,
+        "wait": false,
+        "resolution": "1024x768",
+        "web": true
+      },
+      "order": 1003
+    }
+  ],
+  "limitations": {
+    "_comment": "Surfaced in the SCALE UI as informational text — not a SCALE schema field. Mirrors docs/14-limitations.md §'proxmox / unraid / truenas'.",
+    "no_ab_updates": "Updates require replacing the zvol contents; A/B partitions are not wired.",
+    "no_pcie_passthrough_documentation": "TrueNAS supports PCIe passthrough but deputyOS does not bundle Coral/Hailo/GPU runtimes for the truenas target."
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "_comment": "Limits for the fly-machines target (OCI artefact, container PID 1). Sized for the 2 GB shared-cpu-1x machine (1 GB is below floor). Schema in deputyctl/src/limits.rs. Many baseline assumptions (systemd, AppArmor enforce, persistent daemons) do not hold inside a container; reflected here.",
+  "target": "fly-machines",
+  "tier": "low",
+  "ram_mb": 2048,
+  "ram_class": "low",
+  "storage_class": "block",
+  "cloud": "fly",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": false,
+    "channels_heavy": [
+      "telegram",
+      "slack"
+    ],
+    "channels_disabled_by_ram": [
+      "discord",
+      "whatsapp-cloud-webhook",
+      "matrix"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "ephemeral-storage",
+      "reason": "Fly machines without an attached volume lose state on stop. The data partition is a Fly volume; if the volume is deleted, agent state is lost.",
+      "unblock": "always attach a Fly volume mount per fly/fly.toml.example; back up to B2/R2"
+    },
+    {
+      "id": "cold-start-latency",
+      "reason": "Free Fly machines auto-stop and cold-start adds several seconds; not ideal for low-latency voice channels",
+      "unblock": "set min_machines_running=1 on a paid plan to keep the machine warm"
+    },
+    {
+      "id": "no-audio",
+      "reason": "Fly machines have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "apparmor-complain",
+      "reason": "AppArmor enforce mode requires --privileged or specific capability grants Fly's default machine config does not provide. Profiles ship in complain mode.",
+      "unblock": "deploy to a Fly machine with the required Linux capabilities and toggle deputyos_apparmor_mode=enforce"
+    },
+    {
+      "id": "no-clamd",
+      "reason": "Container PID 1 is the agent; clamd as a background daemon is unreliable in this configuration. On-demand clamscan replaces it.",
+      "unblock": "deploy on a non-container target (rpi5, mini-pc, DO, oracle) for persistent clamd"
+    },
+    {
+      "id": "no-systemd",
+      "reason": "Container runs the agent as PID 1; systemd is absent. deputyctl up on this target execs the agent in the foreground rather than poking systemd.",
+      "unblock": "n/a \u2014 this is the documented Fly Machines behaviour. See fly/README.md."
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'low' (2 GB) far below local-LLM threshold; CPU is shared",
+      "unblock": "fly-machines+gpu (paid, M3+) for vLLM, or pick a non-container target"
+    },
+    {
+      "id": "no-airgap",
+      "reason": "fly-machines target is too constrained for an airgap LLM bundle",
+      "unblock": "use a different target (rpi5, x86_64-mini-pc, or a beefy cloud) for AIRGAP=1"
+    }
+  ],
+  "airgap_supported": false,
+  "airgap_max_tier": null
+}

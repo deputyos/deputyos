@@ -1,0 +1,105 @@
+#include <tunables/global>
+
+# AppArmor profile for OpenClaw, baked by the deputyos role at image-build time.
+# Path: /etc/apparmor.d/deputyos.openclaw
+# Reload after edit: apparmor_parser -r /etc/apparmor.d/deputyos.openclaw
+#
+# Confinement intent (docs/09-security.md §AppArmor):
+#   * read+exec on the install root
+#   * read+write on the agent's data dir only
+#   * read on /etc/deputyos/{secrets.env,profiles/openclaw.toml,limits.json}
+#   * inbound + outbound network on the channel ports
+#   * NO mount, NO ptrace of others, NO sys_admin/sys_module/dac_override
+#
+# The profile binds to the binary path that systemd ExecStarts. Both the real
+# `openclaw` (npm-installed shim) and the bake-time stub script live there, so
+# this profile applies to whichever ends up at that path.
+
+profile deputyos.openclaw /opt/deputyos/profiles/openclaw/node_modules/.bin/openclaw flags=(enforce) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Node.js — the real openclaw binary is a #!/usr/bin/env node shim.
+  /usr/bin/node                                       ix,
+  /usr/local/bin/node                                 ix,
+  /usr/bin/env                                        ix,
+
+  # Install tree (read+exec). Native modules ship as .node and shared objects.
+  /opt/deputyos/profiles/openclaw/**                   r,
+  /opt/deputyos/profiles/openclaw/**/*.node            mr,
+  /opt/deputyos/profiles/openclaw/**.so*               mr,
+  /opt/deputyos/profiles/openclaw/node_modules/.bin/*  ix,
+
+  # stub fallback — remove when real openclaw bake is reliable.
+  /usr/bin/bash                                       ix,
+  /usr/bin/nc.openbsd                                 ix,
+  /usr/bin/sleep                                      ix,
+  /usr/bin/dash                                       ix,
+
+  # Data dir (read+write, owner-only).
+  owner /home/agent/.openclaw/                        rw,
+  owner /home/agent/.openclaw/**                      rwk,
+
+  # deputyOS shared config.
+  /etc/deputyos/                                       r,
+  /etc/deputyos/secrets.env                            r,
+  /etc/deputyos/profiles/                              r,
+  /etc/deputyos/profiles/openclaw.toml                 r,
+  /etc/deputyos/profiles/openclaw/                     r,
+  /etc/deputyos/profiles/openclaw/**                   r,
+  /etc/deputyos/limits.json                            r,
+
+  # Common readables.
+  /etc/ld.so.cache                                    r,
+  /etc/ld.so.preload                                  r,
+  /etc/ssl/openssl.cnf                                r,
+  /etc/resolv.conf                                    r,
+  /etc/nsswitch.conf                                  r,
+  /etc/host.conf                                      r,
+  /etc/hosts                                          r,
+  /etc/localtime                                      r,
+  /sys/devices/system/cpu/online                      r,
+  /proc/sys/kernel/random/uuid                        r,
+  /proc/cpuinfo                                       r,
+  /proc/meminfo                                       r,
+  /proc/stat                                          r,
+  /proc/loadavg                                       r,
+  /proc/uptime                                        r,
+  /proc/*/status                                      r,
+  /proc/*/cmdline                                     r,
+  /proc/*/stat                                        r,
+
+  # Network — agent listens on channel ports and reaches out to providers.
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network unix stream,
+  network unix dgram,
+  network netlink raw,
+
+  # Capabilities — none beyond what abstractions/base grants.
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_ptrace,
+  deny capability sys_rawio,
+  deny capability dac_override,
+  deny capability dac_read_search,
+  deny capability mac_admin,
+  deny capability mac_override,
+
+  # Deny risky paths.
+  deny /tmp/**           wx,
+  deny /var/tmp/**       wx,
+  deny /root/**          rwlk,
+  deny /home/[^a]*/**    rwlk,
+  deny /etc/shadow       rwlk,
+  deny /etc/sudoers      rwlk,
+  deny /etc/sudoers.d/** rwlk,
+
+  # Signals + ptrace (self only).
+  signal (send,receive) peer=deputyos.openclaw,
+  ptrace (read,trace)   peer=deputyos.openclaw,
+  /mnt/deputyos/** rwk,
+}

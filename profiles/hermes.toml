@@ -1,0 +1,79 @@
+# Hermes Agent profile manifest.
+# Read by `deputyctl` at runtime; consumed by the image build pipeline at bake time.
+# This file describes what is *already in the image* — there is no install step at boot.
+
+[profile]
+id              = "hermes"
+display_name    = "Hermes Agent"
+upstream_repo   = "NousResearch/hermes-agent"
+release_channel = "stable"
+min_ram_mb      = 4096
+pinned_version  = "0.11.0"
+
+[paths]
+install_root    = "/opt/deputyos/profiles/hermes"
+data_dir        = "/home/agent/.hermes"
+binary          = "/opt/deputyos/profiles/hermes/.venv/bin/hermes"
+
+[runtime]
+language        = "python"
+python_version  = "3.11"
+package_manager = "uv"
+extra_apt       = []
+
+[service]
+unit            = "hermes-gateway.service"
+entrypoint      = "hermes gateway start"
+ports           = [8080]
+
+[health]
+http_check      = "http://127.0.0.1:8080/healthz"
+journal_unit    = "hermes-gateway.service"
+startup_grace_s = 30
+
+[apparmor]
+profile         = "/etc/apparmor.d/deputyos.hermes"
+
+[kernel]
+# Hermes' command-execution sandbox uses unprivileged user namespaces.
+required_sysctls = { "kernel.unprivileged_userns_clone" = "1" }
+
+[wizard]
+prompts = [
+  "model_provider",
+  "channels",
+  "gateway_allowlist",
+  "backup_destination",
+]
+
+[channels]
+supported = [
+  "telegram", "discord", "slack", "whatsapp", "signal", "dingtalk", "twilio-sms",
+  "mattermost", "matrix", "webhook", "email-imap-smtp", "home-assistant", "feishu",
+  "wecom", "imessage",
+]
+
+[memory]
+# Hermes uses an FTS5 SQLite session store. Lives in data_dir; backed up by `deputyctl backup`.
+session_db      = "~/.hermes/sessions.sqlite"
+backup_strategy = "rclone-sync"
+
+[upgrade]
+preserve_dirs   = ["~/.hermes"]
+post_upgrade_hooks = ["deputyctl doctor"]
+
+[egress]
+default_allow_hosts = [
+    "api.openai.com",
+    "api.anthropic.com",
+    "openrouter.ai",
+    "api.telegram.org",
+    "api.signal.org",
+    "api.messenger.com",
+]
+
+
+# M4.5 Lane F: on an air-gapped build (AIRGAP=1), the wizard pre-selects this
+# local LLM provider so the baked LFM2 is chosen automatically without an API key.
+[airgap]
+default_provider = "local-llamacpp-airgap"

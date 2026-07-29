@@ -1,0 +1,47 @@
+{
+  "_comment": "Limits for the hetzner-cloud cloud-init recipe target. Sized for CX22 (Arm Ampere, 4 GB) or CX21 (x86, 4 GB). Schema in deputyctl/src/limits.rs. Note: Hetzner does not give us a custom snapshot \u2014 updates are full re-image cycles via cloud-init.",
+  "target": "hetzner-cloud",
+  "tier": "standard",
+  "ram_mb": 4096,
+  "ram_class": "standard",
+  "storage_class": "block",
+  "cloud": "hetzner",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-audio",
+      "reason": "Hetzner Cloud instances have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "no-signed-image",
+      "reason": "We don't ship a signed Hetzner snapshot; the cloud-init recipe pulls the deputyOS bundle at first boot",
+      "unblock": "verify the recipe SHA before applying; recipe tracks docs/03-image-builds.md"
+    },
+    {
+      "id": "no-ab-partitions",
+      "reason": "Updates are full re-image cycles (delete + redeploy). Less ergonomic than DO 1-Click.",
+      "unblock": "deputyctl update on this target prints a 'redeploy via cloud-init' instruction (M4)"
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'standard' (4 GB) below local-LLM threshold",
+      "unblock": "scale to CX32 / CCX13 or larger"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

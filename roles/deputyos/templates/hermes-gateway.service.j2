@@ -1,0 +1,63 @@
+{# Rendered from profiles/hermes.toml at bake time by the deputyos role.
+   Variables (set in tasks/profile-hermes.yml or via Packer extra_vars):
+     hermes_install_root  e.g. /opt/deputyos/profiles/hermes
+     hermes_data_dir      e.g. /home/agent/.hermes
+     hermes_entrypoint    e.g. {{ hermes_install_root }}/.venv/bin/hermes gateway start
+     hermes_unit_name     e.g. hermes-gateway.service
+   The hardening block below is the deputyOS systemd baseline; touch with care.
+   Hermes-specific relaxations vs. openclaw-gateway.service.j2:
+     * RestrictNamespaces excludes user/ipc/uts/net (skill sandbox needs them)
+     * SystemCallFilter additively allows unshare/clone/clone3 (skill sandbox)
+   AppArmor confinement is enforced separately via /etc/apparmor.d/deputyos.hermes
+   which binds to {{ hermes_install_root }}/.venv/bin/hermes. #}
+[Unit]
+Description=Hermes Agent gateway (deputyOS)
+Documentation=https://github.com/NousResearch/hermes-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=deputyos-workloads.slice
+User=agent
+Group=agent
+WorkingDirectory={{ hermes_data_dir }}
+EnvironmentFile=-/etc/deputyos/secrets.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={{ hermes_entrypoint }}
+Restart=always
+RestartSec=5
+
+# Hardening — see docs/09-security.md.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ hermes_data_dir }} /etc/deputyos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+# Hermes' skill sandbox unshares user/ipc/uts/net; we still block mount,
+# cgroup, and pid namespaces to keep escape surface small.
+RestrictNamespaces=~mnt cgroup pid
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Hermes is interpreted Python (no JIT), so MDWX stays on.
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+# Skill sandbox child processes need namespace-creating syscalls.
+SystemCallFilter=unshare clone clone3 setns
+
+# AppArmor profile is loaded by the apparmor.service unit; attachment is by
+# the binary path declared in /etc/apparmor.d/deputyos.hermes.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+# Mostly mirrors .gitignore. Reserved for future container-based build paths.
+.git/
+target/
+build/
+*.qcow2
+*.img
+*.img.xz
+packer_cache/
+.idea/
+.vscode/
+.DS_Store
+*.key
+dev-keys/
+.env.local
+secrets.env

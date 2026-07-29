@@ -1,0 +1,30 @@
+{
+  "_comment": "Default per-1M-token rates per provider (USD). Sourced from each provider's public pricing as of 2026-04-27. NOT authoritative — used only as a sane bootstrap when the agent profile's ledger entry omits cost_usd. Update during routine release prep; the per-message ledger writeback is the source of truth.",
+  "providers": {
+    "openrouter": {
+      "default_model": "anthropic/claude-sonnet-4-6",
+      "input_per_1m_usd": 3.00,
+      "output_per_1m_usd": 15.00
+    },
+    "anthropic": {
+      "default_model": "claude-sonnet-4-6",
+      "input_per_1m_usd": 3.00,
+      "output_per_1m_usd": 15.00
+    },
+    "openai": {
+      "default_model": "gpt-4o",
+      "input_per_1m_usd": 2.50,
+      "output_per_1m_usd": 10.00
+    },
+    "google-ai-studio": {
+      "default_model": "gemini-2.0-flash",
+      "input_per_1m_usd": 0.10,
+      "output_per_1m_usd": 0.40
+    },
+    "mistral": {
+      "default_model": "mistral-large-latest",
+      "input_per_1m_usd": 2.00,
+      "output_per_1m_usd": 6.00
+    }
+  }
+}

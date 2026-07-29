@@ -1,0 +1,10 @@
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+unsound = "deny"
+yanked = "deny"
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "BSD-3-Clause", "BSD-2-Clause", "ISC", "MPL-2.0", "Unicode-3.0", "CC0-1.0", "Unlicense", "Zlib"]
+copyleft = "deny"
+default = "deny"

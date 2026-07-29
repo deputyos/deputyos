@@ -1,0 +1,47 @@
+{
+  "_comment": "Limits for the digitalocean target. Baked at image build time and copied to /etc/deputyos/limits.json. Schema in deputyctl/src/limits.rs. Sized for the s-2vcpu-4gb default droplet (4 GB RAM, block storage). Larger droplets override at runtime via deputyctl doctor's live RAM probe.",
+  "target": "digitalocean",
+  "tier": "standard",
+  "ram_mb": 4096,
+  "ram_class": "standard",
+  "storage_class": "block",
+  "cloud": "digitalocean",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-audio",
+      "reason": "DigitalOcean droplets have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'standard' (4 GB) below local-LLM threshold (8 GB working set)",
+      "unblock": "upgrade to s-4vcpu-8gb or larger; or use a cloud model provider"
+    },
+    {
+      "id": "no-ab-partitions",
+      "reason": "DigitalOcean droplets are single-slot; rollback is via DO snapshot rotation, not A/B partitions",
+      "unblock": "DO maintains 7-day automatic snapshots on enabled droplets; restore from there"
+    },
+    {
+      "id": "bandwidth-billed",
+      "reason": "DigitalOcean meters egress bandwidth; deputyOS does not control or rate-limit it",
+      "unblock": "monitor in DO dashboard; cap channels' attachment-fetch frequency in wizard"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

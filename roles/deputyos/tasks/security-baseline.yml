@@ -1,0 +1,517 @@
+---
+# Security baseline. Implements every default-on control from
+# docs/09-security.md that is expected at M1.
+#
+# Order:
+#   1. Sysctls (cheap, fail-closed kernel knobs)
+#   2. ufw (default-deny inbound)
+#   3. fail2ban (sshd jail)
+#   4. SSH hardening drop-in
+#   5. AppArmor framework (profiles dropped by Lane F)
+#   6. zram
+#   7. ClamAV (slow — freshclam at bake time)
+#   8. Magika (venv install — keeps system Python clean)
+#   9. agent user + /etc/deputyos directory layout
+#  10. deputyctl binary install + active-profile + limits.json
+#
+# Lane F's profile-*.yml runs after this and notifies the
+# "Reparse AppArmor profiles" handler when it drops its profile file.
+
+# ---------- 0. acl (Ansible unprivileged-become support) ----------
+
+# Install the `acl` package so /usr/bin/setfacl is present. Ansible needs this
+# when a task does `become_user: agent` (an unprivileged user): it creates the
+# module's temp files as root and must make them readable by the becoming user.
+# With setfacl available Ansible runs `setfacl -m u:agent:rX <file>`; WITHOUT it
+# Ansible falls back to `chmod A+user:agent:rx:allow` (NFSv4 ACL syntax), which
+# coreutils `chmod` on Linux rejects with "chmod: invalid mode: 'A+...'" —
+# failing every become_user: agent task (profile-openclaw npm install,
+# profile-hermes venv + pip, profile-khoj). This was previously masked because
+# the airgap-baseline `meta: end_play` gate truncated every AIRGAP=0 build
+# before the profile bake ran; now that the airgap gate self-gates via a block,
+# the profile bakes actually execute and hit this. Install acl up front so all
+# profiles (and any future become-as-agent task) are covered.
+- name: Install acl (setfacl) for Ansible unprivileged-become tasks
+  ansible.builtin.apt:
+    name: acl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---------- 1. Sysctls ----------
+
+- name: Drop hardened sysctl bundle
+  ansible.builtin.template:
+    src: 90-deputyos.conf.j2
+    dest: /etc/sysctl.d/90-deputyos.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
+
+# ---------- 2. ufw ----------
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Drop ufw application profile
+  ansible.builtin.template:
+    src: ufw.rules.j2
+    dest: /etc/ufw/applications.d/deputyos
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload ufw
+
+- name: Set ufw default deny incoming
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set ufw default allow outgoing
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Allow SSH through ufw (22/tcp)
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+
+- name: Allow wizard through ufw on loopback only (8088/tcp)
+  # The wizard binds 127.0.0.1:8088; this rule documents the intent at
+  # the firewall layer too. External traffic hits the default-deny.
+  community.general.ufw:
+    rule: allow
+    port: "8088"
+    proto: tcp
+    interface: lo
+    direction: in
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+    logging: "low"
+
+# ---------- 3. fail2ban ----------
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: Configure fail2ban sshd jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. See docs/09-security.md §fail2ban.
+      [DEFAULT]
+      bantime = 10m
+      findtime = 10m
+      maxretry = 5
+      backend = systemd
+
+      [sshd]
+      enabled = true
+      port = ssh
+      maxretry = 5
+      bantime = 10m
+  notify: Restart fail2ban
+
+- name: Enable fail2ban service
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+
+# ---------- 4. SSH hardening ----------
+
+- name: Ensure /etc/ssh/sshd_config.d exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Drop sshd hardening config
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-deputyos.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. See docs/09-security.md §SSH.
+      # Bake-time only: smoke test boots fresh, so handlers do not restart sshd.
+      Protocol 2
+      PasswordAuthentication no
+      PermitRootLogin prohibit-password
+      KbdInteractiveAuthentication no
+      MaxAuthTries 3
+      LoginGraceTime 30
+  notify: Restart sshd config check
+
+# ---------- 5. AppArmor framework ----------
+
+- name: Install AppArmor packages
+  ansible.builtin.apt:
+    name:
+      - apparmor
+      - apparmor-utils
+    state: present
+
+- name: Enable AppArmor service
+  ansible.builtin.service:
+    name: apparmor
+    enabled: true
+
+# Note: kernel cmdline edit is variant-specific.
+#   - qemu-aarch64: Debian cloud images already boot with AppArmor enabled.
+#   - rpi5: variant-rpi5.yml edits /boot/firmware/cmdline.txt.
+
+# ---------- 6. zram ----------
+
+- name: Install zram-tools
+  ansible.builtin.apt:
+    name: zram-tools
+    state: present
+
+- name: Configure zramswap
+  ansible.builtin.copy:
+    dest: /etc/default/zramswap
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. See docs/13-memory-pressure.md.
+      ALGO=lz4
+      PERCENT=50
+      PRIORITY=100
+
+- name: Enable zramswap service
+  ansible.builtin.service:
+    name: zramswap
+    enabled: true
+
+# ---------- 7. ClamAV ----------
+
+- name: Install ClamAV
+  ansible.builtin.apt:
+    name:
+      - clamav
+      - clamav-daemon
+      - clamav-freshclam
+    state: present
+
+- name: Stop freshclam to permit foreground signature update
+  # The package starts a background freshclam that locks the DB; stop it
+  # so we can run a one-shot update synchronously.
+  ansible.builtin.service:
+    name: clamav-freshclam
+    state: stopped
+  failed_when: false
+
+- name: Bake ClamAV signatures via freshclam (best-effort)
+  block:
+    - name: Run freshclam once
+      ansible.builtin.command: freshclam --no-warnings
+      register: deputyos_freshclam_run
+      changed_when: deputyos_freshclam_run.rc == 0
+      failed_when: false
+      timeout: 600
+  rescue:
+    - name: Warn that freshclam failed (offline build?)
+      ansible.builtin.debug:
+        msg: >-
+          freshclam failed at bake time; image will refresh signatures on
+          first online boot. Reason: {{ deputyos_freshclam_run.stderr | default('unknown') }}
+
+- name: Re-enable freshclam timer for runtime updates
+  ansible.builtin.service:
+    name: clamav-freshclam
+    enabled: true
+  failed_when: false
+
+- name: Enable clamav-daemon at boot when target has RAM headroom
+  # Stay STOPPED at bake time — qcow2 is sealed, daemon starts on first boot.
+  ansible.builtin.service:
+    name: clamav-daemon
+    enabled: "{{ deputyos_clamav_daemon_enabled | bool }}"
+
+- name: Drop daily clamscan systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-clamscan.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Daily on-demand scan of /home and /opt/deputyos.
+      [Unit]
+      Description=deputyOS daily ClamAV scan
+      After=clamav-daemon.service
+
+      [Service]
+      Type=oneshot
+      Nice=10
+      IOSchedulingClass=idle
+      ExecStart=/usr/bin/clamscan --recursive --infected --quiet /home /opt/deputyos
+  notify: Reload systemd
+
+- name: Drop daily clamscan systemd timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-clamscan.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Run deputyos-clamscan daily
+
+      [Timer]
+      OnCalendar=daily
+      Persistent=true
+      RandomizedDelaySec=30min
+
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Enable clamscan timer
+  ansible.builtin.systemd:
+    name: deputyos-clamscan.timer
+    enabled: true
+    daemon_reload: true
+
+# ---------- 8. Magika ----------
+
+- name: Install Magika prerequisites
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+      - python3-pip
+    state: present
+
+- name: Ensure /opt/deputyos exists
+  ansible.builtin.file:
+    path: /opt/deputyos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create Magika virtualenv
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/deputyos/magika
+    creates: /opt/deputyos/magika/bin/python
+
+- name: Install Magika into the venv
+  ansible.builtin.pip:
+    name: magika
+    virtualenv: /opt/deputyos/magika
+    state: present
+  # pip module needs the python interpreter from the venv; defaults are fine
+  # because virtualenv= triggers the right invocation.
+
+- name: Symlink magika into PATH
+  ansible.builtin.file:
+    src: /opt/deputyos/magika/bin/magika
+    dest: /usr/local/bin/magika
+    state: link
+    force: true
+
+# ---------- 9. agent user + /etc/deputyos layout ----------
+
+- name: Create agent group
+  ansible.builtin.group:
+    name: agent
+    state: present
+    system: true
+
+- name: Create agent user
+  ansible.builtin.user:
+    name: agent
+    group: agent
+    home: /home/agent
+    shell: /bin/bash
+    create_home: true
+    state: present
+    system: true
+    password: "!"   # disabled-but-not-locked; key-only login
+
+- name: Ensure /etc/deputyos exists
+  ansible.builtin.file:
+    path: "{{ deputyos_etc_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Stat staged release verification key
+  ansible.builtin.stat:
+    path: "{{ deputyos_release_pubkey_path }}"
+  register: deputyos_release_pubkey_stat
+  delegate_to: localhost
+  become: false
+
+- name: Install stable-release minisign public key
+  ansible.builtin.copy:
+    src: "{{ deputyos_release_pubkey_path }}"
+    dest: "{{ deputyos_release_pubkey_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: deputyos_release_pubkey_stat.stat.exists
+
+- name: Warn when stable-release verification key is not staged
+  ansible.builtin.debug:
+    msg: >-
+      Release pubkey not staged at {{ deputyos_release_pubkey_path }}.
+      Stable updates will be unavailable until the build sets
+      DEPUTYOS_RELEASE_PUBKEY_FILE; dev builds can still use an explicitly
+      trusted contributor key.
+  when: not deputyos_release_pubkey_stat.stat.exists
+
+- name: Ensure /etc/deputyos/profiles exists
+  ansible.builtin.file:
+    path: "{{ deputyos_profiles_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Touch /etc/deputyos/secrets.env
+  ansible.builtin.copy:
+    dest: "{{ deputyos_secrets_path }}"
+    content: ""
+    force: false
+    owner: agent
+    group: agent
+    mode: "0600"
+
+# ---------- 10. deputyctl + active-profile + limits.json ----------
+
+- name: Stat staged deputyctl binary
+  ansible.builtin.stat:
+    path: "{{ deputyos_deputyctl_path }}"
+  register: deputyos_deputyctl_stat
+  delegate_to: localhost
+  become: false
+
+- name: Fail clearly if deputyctl staging is missing
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_stat.stat.exists
+    fail_msg: >-
+      Expected a pre-built deputyctl at {{ deputyos_deputyctl_path }} on the Packer
+      host. Run scripts/build.sh (which stages it) or set deputyos_deputyctl_path
+      via -e. See docs/03-image-builds.md.
+
+- name: Install deputyctl binary
+  ansible.builtin.copy:
+    src: "{{ deputyos_deputyctl_path }}"
+    dest: /usr/local/bin/deputyctl
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write /etc/deputyos/active-profile
+  ansible.builtin.copy:
+    dest: "{{ deputyos_active_profile_path }}"
+    content: "{{ deputyos_profile }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Stat staged profile manifest
+  ansible.builtin.stat:
+    path: "{{ deputyos_profile_staging_path }}/{{ deputyos_profile }}.toml"
+  register: deputyos_profile_toml_stat
+  delegate_to: localhost
+  become: false
+
+- name: Install active profile manifest
+  ansible.builtin.copy:
+    src: "{{ deputyos_profile_staging_path }}/{{ deputyos_profile }}.toml"
+    dest: "{{ deputyos_profiles_dir }}/{{ deputyos_profile }}.toml"
+    owner: root
+    group: root
+    mode: "0644"
+  when: deputyos_profile_toml_stat.stat.exists
+
+- name: Stat staged limits.json
+  ansible.builtin.stat:
+    path: "{{ deputyos_limits_staging_path }}"
+  register: deputyos_limits_stat
+  delegate_to: localhost
+  become: false
+
+- name: Install limits.json (from staging)
+  ansible.builtin.copy:
+    src: "{{ deputyos_limits_staging_path }}"
+    dest: "{{ deputyos_limits_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: deputyos_limits_stat.stat.exists
+
+- name: Install limits.json (embedded fallback)
+  # Lane A may not have shipped deputyctl/etc/limits.<hw>.json yet; ship a
+  # minimal default so `deputyctl doctor` and the smoke harness can parse
+  # /etc/deputyos/limits.json on day one.
+  ansible.builtin.copy:
+    dest: "{{ deputyos_limits_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "schema": "deputyos.limits/v1",
+        "hw": "{{ deputyos_hw }}",
+        "ram_mb": {{ deputyos_target_ram_mb }},
+        "storage_class": "{{ deputyos_target_storage_class }}",
+        "deputyos_clamav_daemon_enabled": {{ deputyos_clamav_daemon_enabled | string | lower }},
+        "fallback": true
+      }
+  when: not deputyos_limits_stat.stat.exists
+
+- name: Stat staged providers.json
+  # The provider catalogue the wizard reads at boot. Unlike limits.json
+  # there's no sensible synthetic fallback — it's real data — so a missing
+  # stage fails the build clearly rather than shipping a wizard that
+  # crash-loops ("loading providers catalogue: No such file or directory").
+  ansible.builtin.stat:
+    path: "{{ deputyos_providers_staging_path }}"
+  register: deputyos_providers_stat
+  delegate_to: localhost
+  become: false
+
+- name: Install providers.json (from staging)
+  # deputywizard model::load_providers() reads /etc/deputyos/providers.json at
+  # boot (via deputyctl::paths::providers_file); without it the wizard exits
+  # before binding :8088 and the first-boot UI never comes up.
+  # scripts/build.sh stages deputyctl/etc/providers.json here.
+  ansible.builtin.copy:
+    src: "{{ deputyos_providers_staging_path }}"
+    dest: "{{ deputyos_providers_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: deputyos_providers_stat.stat.exists
+
+- name: Fail clearly if providers.json staging is missing
+  ansible.builtin.assert:
+    that:
+      - deputyos_providers_stat.stat.exists
+    fail_msg: >-
+      providers.json not staged at {{ deputyos_providers_staging_path }} — the
+      wizard cannot boot without the provider catalogue (it crash-loops on
+      "loading providers catalogue"). Run scripts/build.sh (it stages
+      deputyctl/etc/providers.json) or set deputyos_providers_staging_path via -e.
+  when: not deputyos_providers_stat.stat.exists

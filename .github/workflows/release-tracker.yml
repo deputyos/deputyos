@@ -1,0 +1,68 @@
+---
+name: release-tracker
+
+# Polls upstream profile repos every 30 min via `make track-propose`,
+# opens a PR per pending bump. The Make target is the contract — this
+# workflow is a thin wrapper. See deputyos-track/src/main.rs and
+# docs/04-release-tracking.md.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91.1"
+      - name: Propose bumps
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make track-propose
+      - name: Ensure automation labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create tracker --color 1d76db --description "Automated upstream release tracker" --force
+          gh label create auto-pr --color 0e8a16 --description "Pull request created by automation" --force
+      - name: Open PR per profile
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for meta in build/track/propose-*.json; do
+            id="$(jq -r .profile_id "$meta")"
+            old="$(jq -r .old_version "$meta")"
+            new="$(jq -r .new_version "$meta")"
+            path="$(jq -r .profile_path "$meta")"
+            url="$(jq -r '.release_url // ""' "$meta")"
+            at="$(jq -r '.released_at // ""' "$meta")"
+            body_notes="$(jq -r '.release_body // ""' "$meta" | head -c 4000)"
+            patch="${meta%.json}.patch"
+            branch="track/${id}-${new}"
+            git config user.name  "deputyos-tracker[bot]"
+            git config user.email "tracker@deputyos.invalid"
+            # Every proposal must start from the triggering main commit; do
+            # not accidentally stack the previous profile bump into this PR.
+            git checkout -B "$branch" "$GITHUB_SHA"
+            cp "$patch" "$path"
+            git add "$path"
+            title="track: bump ${id} pinned_version ${old} → ${new}"
+            git commit -m "$title" || { echo "no changes for $id"; continue; }
+            git push -f -u origin "$branch"
+            pr_body=$(printf 'Auto-bump from upstream tag released at %s.\n\nRelease: %s\n\n---\n\n%s\n' \
+              "$at" "$url" "$body_notes")
+            gh pr create --title "$title" --body "$pr_body" \
+              --label tracker --label auto-pr --head "$branch" --base main \
+              || gh pr edit "$branch" --title "$title" --body "$pr_body"
+          done

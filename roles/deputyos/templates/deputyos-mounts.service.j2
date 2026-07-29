@@ -1,0 +1,16 @@
+[Unit]
+Description=deputyOS drive mount materialiser
+Documentation=https://docs.deputyos.com/how-to/operate/mount-drives/
+After=local-fs.target network-online.target
+Before=deputywizard.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/deputyos/deputyos-mount-materialise.sh
+ExecStop=/usr/local/lib/deputyos/deputyos-mount-materialise.sh --unmount
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+# CODEOWNERS — deputyOS
+#
+# Every PR auto-requests a review from the matching owners.
+# Until M1, the maintainers handle every lane.
+
+*                       @deputyos/maintainers
+
+# Lane A — Manager binary (Rust)
+/crates/deputyctl/       @deputyos/lane-a-rust
+
+# Lane B — Image build pipeline
+/pi-gen/                @deputyos/lane-b-build
+/packer/                @deputyos/lane-b-build
+/roles/                 @deputyos/lane-b-build
+/cloud-init/            @deputyos/lane-b-build
+/.github/workflows/build.yml  @deputyos/lane-b-build
+
+# Lane C — Wizard & first-boot UX
+/crates/deputyctl/src/wizard/  @deputyos/lane-c-ux
+/web/                   @deputyos/lane-c-ux
+
+# Lane D — Release & update infra
+/.github/workflows/release-tracker.yml @deputyos/lane-d-release
+/scripts/release/       @deputyos/lane-d-release
+
+# Lane E — Security & hardening
+/apparmor/              @deputyos/lane-e-security
+/sysctl/                @deputyos/lane-e-security
+/docs/09-security.md    @deputyos/lane-e-security
+/docs/adr/0008-*        @deputyos/lane-e-security
+SECURITY.md             @deputyos/lane-e-security
+
+# Lane F — Profiles & content
+/profiles/              @deputyos/lane-f-profiles
+/roles/deputyos/tasks/profile-*.yml @deputyos/lane-f-profiles
+
+# Lane G — Site / docs / community
+/docs/                  @deputyos/lane-g-docs
+README.md               @deputyos/lane-g-docs
+CONTRIBUTING.md         @deputyos/lane-g-docs

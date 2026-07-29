@@ -1,0 +1,169 @@
+site_name: deputyOS Technical Documentation
+site_description: >
+  Technical reference for deputyOS — the batteries-included appliance image
+  for personal AI assistants (OpenClaw, Hermes, Khoj, …) on Pi / x86 / cloud.
+site_url: https://docs.deputyos.com/
+repo_url: https://github.com/deputyos/deputyos
+repo_name: deputyos/deputyos
+edit_uri: edit/main/documentation/docs/
+copyright: Apache-2.0 — deputyOS contributors
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.snippets
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+      clickable_checkbox: false
+  - pymdownx.tilde
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/deputyos/deputyos
+  generator: false
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - concepts/architecture.md
+      - concepts/profile-class.md
+      - concepts/plugin-model.md
+      - concepts/airgap.md
+      - concepts/threat-model-overview.md
+      - concepts/threat-model-accounts.md
+      - concepts/threat-model-egress.md
+  - Reference:
+      - CLI:
+          - reference/cli/deputyctl.md
+          - reference/cli/deputywizard.md
+          - reference/cli/deputypwa.md
+          - reference/cli/deputyos-track.md
+          - reference/cli/deputyos-desktop.md
+      - Schemas:
+          - reference/schemas/profile-toml.md
+          - reference/schemas/release-manifest.md
+          - reference/schemas/limits-json.md
+          - reference/schemas/providers-json.md
+          - reference/schemas/hook-payloads.md
+          - reference/schemas/mounts-policy.md
+          - reference/schemas/network-policy.md
+          - reference/schemas/network-defaults.md
+      - System:
+          - reference/system/filesystem-layout.md
+          - reference/system/systemd-units.md
+          - reference/system/apparmor-profiles.md
+      - APIs:
+          - reference/apis/wizard-http.md
+          - reference/apis/pwa-http.md
+          - reference/apis/message-relay.md
+  - How-to:
+      - Develop:
+          - how-to/develop/run-locally.md
+      - Extend:
+          - how-to/add-a-profile.md
+          - how-to/add-a-hardware-target.md
+          - how-to/add-a-hook.md
+          - how-to/add-a-model-provider.md
+          - how-to/add-a-channel.md
+      - Operate:
+          - how-to/rotate-keys.md
+          - how-to/backup-and-restore.md
+          - how-to/backup-and-restore-cloud.md
+          - how-to/enable-voice.md
+          - how-to/set-up-tunnel.md
+          - how-to/operate/mount-drives.md
+          - how-to/operate/egress-whitelist.md
+          - how-to/operate/desktop-console.md
+  - Operations:
+      - operations/monitoring-and-logs.md
+      - operations/cost-guardrails.md
+      - operations/update-and-rollback.md
+  - Security:
+      - security/default-on-controls.md
+      - security/secrets-storage.md
+      - security/update-trust-chain.md
+      - security/reporting-vulnerabilities.md
+  - Build:
+      - build/make-targets.md
+      - build/image-bake-internals.md
+      - build/airgap-builds.md
+  - Distribution:
+      - distribution/hardware-matrix.md
+      - distribution/desktop-launcher-internals.md
+  - Contributing:
+      - contributing/overview.md
+  - Glossary: glossary.md

@@ -1,0 +1,272 @@
+---
+# Voice baseline — Phase 7 Lane Voice (M6 Lane A/B/F).
+#
+# Bakes whisper.cpp + Piper + a thin shell-script bridge that connects
+# the audio I/O path to the message-relay socket the OpenClaw and
+# Hermes profiles already speak (see deputyctl/src/message_relay.rs).
+#
+# Layout produced by this task list:
+#   * /opt/deputyos/voice/whisper-cli                    (STT binary)
+#   * /opt/deputyos/voice/whisper-{model}.bin            (STT model)
+#   * /opt/deputyos/voice/piper                          (TTS binary)
+#   * /opt/deputyos/voice/piper/{voice}.onnx[.json]      (TTS model)
+#   * /opt/deputyos/voice/voice-relay.sh                 (the bridge)
+#   * /etc/deputyos/voice.toml                           (runtime config)
+#   * /etc/systemd/system/deputyos-voice-relay.service   (enabled, not started)
+#   * /etc/apparmor.d/deputyos.voice-relay               (enforce)
+#
+# IMPORTANT: profiles/openclaw.toml and profiles/hermes.toml are
+# M0-FROZEN. We do NOT touch those manifests; voice config lives
+# entirely in /etc/deputyos/voice.toml. Reference: docs/11-roadmap.md
+# §M6 Lane A/B/F and the Phase 7 Lane Voice work item.
+#
+# Skip-everything gates:
+#   1. deputyos_voice_enabled=false (default) — entire file is a no-op.
+#   2. deputyos_hw in deputyos_no_voice_hw (rpi4, wsl2, cloud, macos-qemu)
+#      — even with the flag set, refuse to bake voice assets that the
+#      hardware can't run. Keeps the surface honest per
+#      docs/14-limitations.md.
+#
+# The deputywizard (or future voice-setup step) flips
+# deputyos_voice_enabled to true via a per-host overlay.
+
+- name: Decide whether to bake voice assets  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    deputyos_voice_should_bake: >-
+      {{ (deputyos_voice_enabled | bool)
+         and (deputyos_hw not in deputyos_no_voice_hw) }}
+  tags: [voice]
+
+- name: Note voice baseline skipped (disabled or unsupported hw)
+  ansible.builtin.debug:
+    msg: >-
+      voice-baseline: skipping (deputyos_voice_enabled={{ deputyos_voice_enabled }},
+      deputyos_hw={{ deputyos_hw }}, no_voice_hw={{ deputyos_no_voice_hw }}).
+      See docs/14-limitations.md for per-target voice support.
+  when: not (deputyos_voice_should_bake | bool)
+  tags: [voice]
+
+# ---------- Everything below runs only when voice is being baked ----------
+
+- name: Voice block (gated)
+  when: deputyos_voice_should_bake | bool
+  tags: [voice]
+  block:
+
+    # ---- 1. Audio + build deps ----------------------------------------
+    # whisper-cli (whisper.cpp's ggml CLI wrapper) uses SDL2 for live
+    # capture; piper writes raw PCM to stdout which we feed to aplay.
+    # libasound2 covers ALSA at runtime; -dev is needed only if a
+    # contributor rebuilds in-place — kept off the appliance image.
+    - name: Install audio runtime + build deps
+      ansible.builtin.apt:
+        name:
+          - alsa-utils       # provides aplay/arecord
+          - libasound2       # ALSA runtime
+          - libsdl2-2.0-0    # whisper-cli capture (runtime)
+          - jq               # voice-relay.sh parses whisper JSON
+          - netcat-openbsd   # voice-relay.sh talks to the relay socket
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # ---- 2. Install root + agent group membership ---------------------
+    - name: Ensure voice install root exists
+      ansible.builtin.file:
+        path: "{{ deputyos_voice_install_root }}"
+        state: directory
+        owner: agent
+        group: agent
+        mode: "0755"
+
+    - name: Ensure piper subdir exists (voice models live alongside binary)
+      ansible.builtin.file:
+        path: "{{ deputyos_voice_install_root }}/piper"
+        state: directory
+        owner: agent
+        group: agent
+        mode: "0755"
+
+    - name: Add agent user to the audio group
+      # /dev/snd/* is group=audio mode=0660 on Debian/Ubuntu. Without
+      # this, the deputyos-voice-relay service can't open the soundcard
+      # even with the AppArmor mediation in place.
+      ansible.builtin.user:
+        name: agent
+        groups: audio
+        append: true
+
+    # ---- 3. Voice asset staging facts ---------------------------------
+    - name: Set voice-asset staging filenames  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.set_fact:
+        deputyos_voice_stt_staged_path: "{{ deputyos_voice_staging_dir }}/whisper-cli"
+        deputyos_voice_model_staged_path: "{{ deputyos_voice_staging_dir }}/{{ deputyos_voice_stt_model }}.bin"
+        deputyos_voice_piper_staged_path: "{{ deputyos_voice_staging_dir }}/piper"
+        deputyos_voice_tts_model_staged_path: "{{ deputyos_voice_staging_dir }}/{{ deputyos_voice_tts_voice }}.onnx"
+        deputyos_voice_tts_meta_staged_path: "{{ deputyos_voice_staging_dir }}/{{ deputyos_voice_tts_voice }}.onnx.json"
+        deputyos_voice_manifest_staged_path: "{{ deputyos_voice_staging_dir }}/MANIFEST"
+
+    - name: Stat staged voice assets
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: deputyos_voice_asset_stat
+      delegate_to: localhost
+      become: false
+      loop:
+        - { name: "whisper-cli", path: "{{ deputyos_voice_stt_staged_path }}" }
+        - { name: "stt-model", path: "{{ deputyos_voice_model_staged_path }}" }
+        - { name: "piper", path: "{{ deputyos_voice_piper_staged_path }}" }
+        - { name: "tts-model", path: "{{ deputyos_voice_tts_model_staged_path }}" }
+        - { name: "tts-meta", path: "{{ deputyos_voice_tts_meta_staged_path }}" }
+        - { name: "manifest", path: "{{ deputyos_voice_manifest_staged_path }}" }
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Compute voice-asset readiness  # noqa: var-naming[no-role-prefix]
+      ansible.builtin.set_fact:
+        deputyos_voice_assets_ready: >-
+          {{ deputyos_voice_asset_stat.results
+             | map(attribute='stat.exists')
+             | list
+             | min }}
+
+    - name: Warn when voice staging is empty (assets not downloaded)
+      ansible.builtin.debug:
+        msg: >-
+          voice-baseline: assets not staged at {{ deputyos_voice_staging_dir }}.
+          Run scripts/build.sh with voice support (set DEPUTYOS_VOICE_OFFLINE=0
+          and ensure network) to download whisper.cpp + Piper. Falling back
+          to a placeholder install — the systemd unit will refuse to start
+          until real binaries land.
+      when: not (deputyos_voice_assets_ready | bool)
+
+    # ---- 4. Stage whisper.cpp + model --------------------------------
+    - name: Install whisper-cli binary (when staged)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_stt_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/whisper-cli"
+        owner: agent
+        group: agent
+        mode: "0755"
+      when: deputyos_voice_assets_ready | bool
+
+    - name: Install whisper STT model (when staged)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_model_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/{{ deputyos_voice_stt_model }}.bin"
+        owner: agent
+        group: agent
+        mode: "0644"
+      when: deputyos_voice_assets_ready | bool
+
+    # ---- 5. Stage Piper + TTS voice ----------------------------------
+    - name: Install piper binary (when staged)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_piper_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/piper"
+        owner: agent
+        group: agent
+        mode: "0755"
+      when: deputyos_voice_assets_ready | bool
+
+    - name: Install piper voice model (when staged)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_tts_model_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/piper/{{ deputyos_voice_tts_voice }}.onnx"
+        owner: agent
+        group: agent
+        mode: "0644"
+      when: deputyos_voice_assets_ready | bool
+
+    - name: Install piper voice metadata (when staged)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_tts_meta_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/piper/{{ deputyos_voice_tts_voice }}.onnx.json"
+        owner: agent
+        group: agent
+        mode: "0644"
+      when: deputyos_voice_assets_ready | bool
+
+    - name: Install voice-asset MANIFEST (provenance — sha256 + URLs)
+      ansible.builtin.copy:
+        src: "{{ deputyos_voice_manifest_staged_path }}"
+        dest: "{{ deputyos_voice_install_root }}/MANIFEST"
+        owner: root
+        group: root
+        mode: "0644"
+      when: deputyos_voice_assets_ready | bool
+
+    # ---- 6. The bridge shell script ----------------------------------
+    - name: Drop voice-relay.sh bridge script
+      ansible.builtin.copy:
+        src: voice/voice-relay.sh
+        dest: "{{ deputyos_voice_install_root }}/voice-relay.sh"
+        owner: agent
+        group: agent
+        mode: "0755"
+
+    # ---- 7. /etc/deputyos/voice.toml runtime config -------------------
+    - name: Render /etc/deputyos/voice.toml runtime config
+      ansible.builtin.template:
+        src: voice.toml.j2
+        dest: "{{ deputyos_etc_dir }}/voice.toml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # ---- 8. systemd unit ---------------------------------------------
+    - name: Render deputyos-voice-relay.service unit
+      ansible.builtin.template:
+        src: deputyos-voice-relay.service.j2
+        dest: /etc/systemd/system/deputyos-voice-relay.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Verify voice-relay systemd unit (best-effort)
+      ansible.builtin.command:
+        cmd: systemd-analyze verify /etc/systemd/system/deputyos-voice-relay.service
+      changed_when: false
+      failed_when: false
+      register: deputyos_voice_unit_verify  # noqa: var-naming[no-role-prefix]
+
+    - name: Surface systemd-analyze findings (non-fatal)
+      ansible.builtin.debug:
+        msg: "{{ deputyos_voice_unit_verify.stderr_lines | default([]) }}"
+      when: deputyos_voice_unit_verify.rc | default(0) != 0
+
+    - name: Enable deputyos-voice-relay.service (do not start at bake)
+      ansible.builtin.systemd:
+        name: deputyos-voice-relay.service
+        enabled: true
+        daemon_reload: true
+      failed_when: false
+
+    # ---- 9. AppArmor profile -----------------------------------------
+    - name: Drop voice-relay AppArmor profile
+      ansible.builtin.copy:
+        src: apparmor/deputyos.voice-relay
+        dest: /etc/apparmor.d/deputyos.voice-relay
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reparse AppArmor profiles
+
+    - name: Validate voice-relay AppArmor profile syntax (best-effort)
+      ansible.builtin.command:
+        cmd: apparmor_parser -Q -K /etc/apparmor.d/deputyos.voice-relay
+      changed_when: false
+      failed_when: false
+      register: deputyos_voice_aa_verify  # noqa: var-naming[no-role-prefix]
+
+    - name: Fail if voice-relay AppArmor profile is malformed
+      ansible.builtin.fail:
+        msg: >-
+          AppArmor voice-relay profile failed to parse:
+          {{ deputyos_voice_aa_verify.stderr | default('(no stderr)') }}
+      when:
+        - deputyos_voice_aa_verify.rc is defined
+        - deputyos_voice_aa_verify.rc != 0
+        - "'apparmor_parser' in deputyos_voice_aa_verify.stderr | default('')
+            or 'syntax' in deputyos_voice_aa_verify.stderr | default('') | lower"

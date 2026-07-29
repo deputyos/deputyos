@@ -1,0 +1,47 @@
+{
+  "_comment": "Limits for the linode (Akamai) cloud-init recipe target. Sized for Linode 4 GB (the wizard-recommended floor; Nanode 1 GB is below minimum). Schema in deputyctl/src/limits.rs.",
+  "target": "linode",
+  "tier": "standard",
+  "ram_mb": 4096,
+  "ram_class": "standard",
+  "storage_class": "block",
+  "cloud": "linode",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-audio",
+      "reason": "Linode instances have no audio device; voice features disabled",
+      "unblock": "deploy on rpi5 8GB+ or x86_64-mini-pc for voice"
+    },
+    {
+      "id": "no-signed-image",
+      "reason": "We don't ship a signed Linode image; the cloud-init recipe pulls the deputyOS bundle at first boot",
+      "unblock": "verify the recipe SHA before applying"
+    },
+    {
+      "id": "no-ab-partitions",
+      "reason": "Updates are full re-image cycles (delete + redeploy via StackScript / cloud-init)",
+      "unblock": "deputyctl update on this target prints a redeploy instruction (M4)"
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'standard' (4 GB) below local-LLM threshold (8 GB)",
+      "unblock": "scale to Linode 8 GB+ or use a cloud model provider"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

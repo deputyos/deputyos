@@ -1,0 +1,66 @@
+{
+  "_comment": "Per-target limits for rpi4. Copied to /etc/deputyos/limits.json at bake time. Schema lives in deputyctl/src/limits.rs. See docs/14-limitations.md \u00a7'Pi 4 (4 GB)' for the source-of-truth narrative.",
+  "target": "rpi4",
+  "tier": "low",
+  "ram_mb": 4096,
+  "ram_class": "low",
+  "storage_class": "sd",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": false,
+    "channels_heavy": [
+      "telegram",
+      "slack"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook",
+      "discord-voice"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "no-local-llm",
+      "reason": "Pi 4 RAM (4 GB) and CPU (Cortex-A72) below local-LLM threshold",
+      "unblock": "rpi5 8GB+ or x86_64-mini-pc; or run model via cloud provider"
+    },
+    {
+      "id": "no-voice-wake-word",
+      "reason": "Cortex-A72 too slow for real-time wake-word detection",
+      "unblock": "rpi5 8GB+ or x86_64-mini-pc"
+    },
+    {
+      "id": "no-voice-tts",
+      "reason": "TTS thermal-throttles on passive-cooled Pi 4",
+      "unblock": "rpi5 with active cooler, or x86_64-mini-pc"
+    },
+    {
+      "id": "no-clamav-daemon",
+      "reason": "clamd RSS exceeds Pi 4 RAM headroom; on-demand clamscan timer used instead",
+      "unblock": "rpi5 8GB+ or x86_64-mini-pc"
+    },
+    {
+      "id": "no-whatsapp-cloud-webhook",
+      "reason": "WhatsApp Cloud webhook RSS exceeds low-tier RAM headroom",
+      "unblock": "upgrade to standard or high RAM tier"
+    },
+    {
+      "id": "no-discord-voice",
+      "reason": "Discord voice gateway RSS + jitter buffer exceed low-tier headroom",
+      "unblock": "upgrade to standard or high RAM tier"
+    },
+    {
+      "id": "sd-storage-slow-under-update-load",
+      "reason": "SD card I/O thrashes under simultaneous update + backup load",
+      "unblock": "USB3 SSD recommended (per docs/14)"
+    },
+    {
+      "id": "airgap-lean-only",
+      "reason": "rpi4 CPU can only run LFM2-350M (lean tier) at usable t/s",
+      "unblock": "rpi5 for standard/rich airgap tiers"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "lean"
+}

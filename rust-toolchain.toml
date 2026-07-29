@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned to a recent stable. Bump deliberately; CI matrix relies on a single channel.
+channel = "1.91.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

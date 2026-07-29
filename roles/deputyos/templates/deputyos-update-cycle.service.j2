@@ -1,0 +1,20 @@
+[Unit]
+Description=deputyOS signed automatic update cycle
+Documentation=https://docs.deputyos.com/operations/update-and-rollback/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/deputyctl --internal-update-cycle
+User=root
+Group=root
+StateDirectory=deputyos
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/deputyos /boot /etc/default /etc/deputyos /dev
+ReadWritePaths=-/sys/firmware/efi/efivars
+StandardOutput=journal
+StandardError=journal

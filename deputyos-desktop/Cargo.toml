@@ -1,0 +1,48 @@
+[package]
+name = "deputyos-desktop"
+version = "0.1.0"
+description = "One-click desktop launcher for deputyOS — downloads + verifies + boots the latest signed image in the host's native virtualization."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "deputyos-desktop"
+path = "src/main.rs"
+
+[dependencies]
+# Path dep so we reuse the production-tested manifest types and signature
+# verification — same pattern deputywizard and deputypwa use. The launcher's
+# trust surface is exactly deputyctl's: minisign + sha256 + schema-v1 strict.
+deputyctl = { path = "../deputyctl" }
+deputyd = { package = "deputyd-protocol", path = "../deputyd-protocol" }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Manifest fetch. Same minimal-feature pattern deputyctl uses.
+ureq = { version = "2.10", default-features = false, features = ["tls", "json"] }
+# Cross-platform default-browser opener. ~3KB; pure Rust.
+webbrowser = "1"
+# Platform-canonical cache/data dirs (XDG on Linux, %LOCALAPPDATA% on Windows,
+# ~/Library/Caches on macOS).
+dirs = "5"
+# v4 uuids for instance ids in the named-instance registry (multi-agent
+# desktop console). Small, vetted; `v4` pulls `getrandom` for the RNG.
+uuid = { version = "1", features = ["v4"] }
+# NOTE: `indicatif` (download progress bar) lands in M2.5-rest. The current
+# `download::download_and_verify` prints stderr lines instead. Tracking it
+# in the plan rather than dragging an unused dep into the binary today.
+
+[dev-dependencies]
+tempfile = "3"
+httpmock = "0.7"
+
+[lints]
+workspace = true

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://www.deputyos.com/schemas/network-defaults-v1.json",
+  "profile": "openclaw",
+  "mode": "open",
+  "allow_hosts": [
+    "api.openai.com",
+    "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "api.openrouter.ai",
+    "api.telegram.org",
+    "discord.com",
+    "gateway.discord.gg",
+    "signal.org",
+    "edgesignal.net",
+    "cdn.whatsapp.net",
+    "graph.facebook.com",
+    "slack.com",
+    "matrix.org",
+    "ntfy.sh",
+    "openclaw.github.io",
+    "pypi.org",
+    "files.pythonhosted.org"
+  ]
+}

@@ -1,0 +1,27 @@
+[Unit]
+Description=deputyOS boot-count watchdog — auto-rollback after repeated failures
+Documentation=https://docs.deputyos.com/operations/update-and-rollback/
+DefaultDependencies=no
+After=local-fs.target
+Before=basic.target sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/deputyctl --internal-watchdog-check
+StandardOutput=journal
+StandardError=journal
+
+# Run as root (needs to read/write /var/lib/deputyos/slots.json and modify
+# /boot). The deputyctl binary gates the actual filesystem access with the
+# same user checks as the rest of the surface.
+User=root
+Group=root
+
+# Tight sandbox — only needs to touch /var/lib/deputyos + /boot + /run.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/deputyos /boot /run
+StateDirectory=deputyos

@@ -1,0 +1,5 @@
+# CI/release Ansible toolchain. Keep the CLI and imported Python module in the
+# same isolated virtual environment; runner-global apt/brew packages can mix
+# incompatible versions.
+ansible-core==2.19.11
+ansible-lint==26.6.0

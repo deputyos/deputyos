@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>deputyOS Console</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">d</span>
+          <span><strong>deputyOS</strong><small>Console</small></span>
+        </div>
+        <nav class="nav" aria-label="Primary">
+          <button class="nav-item active" data-view="local">
+            <span aria-hidden="true">⌂</span> Local deputies
+          </button>
+          <button class="nav-item" data-view="fleet">
+            <span aria-hidden="true">◎</span> Remote fleet
+          </button>
+        </nav>
+        <div class="sidebar-foot">
+          <span id="host-dot" class="health-dot pending"></span>
+          <div>
+            <strong id="host-label">Checking host</strong>
+            <small id="host-target">virtualization runtime</small>
+          </div>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">LOCAL RUNTIME</p>
+            <h1 id="page-title">Your deputies</h1>
+          </div>
+          <div class="account">
+            <span class="avatar" aria-hidden="true">D</span>
+            <span id="account-label">Local mode</span>
+            <button id="login-open-btn" class="quiet">Sign in</button>
+            <button id="logout-btn" class="quiet hidden">Log out</button>
+          </div>
+        </header>
+
+        <main id="view-local" class="view">
+          <section class="hero">
+            <div>
+              <p class="eyebrow">PRIVATE COMPUTE, ON YOUR MACHINE</p>
+              <h2>Run a team of isolated AI deputies.</h2>
+              <p>
+                Pause cold workloads, reclaim memory, and reach every deputy
+                securely through its outbound tunnel.
+              </p>
+            </div>
+            <button id="create-open-btn" class="primary large">
+              <span>＋</span> New deputy
+            </button>
+          </section>
+
+          <p id="local-host-note" class="banner hidden"></p>
+
+          <section class="metrics" aria-label="Runtime summary">
+            <article class="metric">
+              <span class="metric-icon violet">◇</span>
+              <div><strong id="metric-total">0</strong><small>Total deputies</small></div>
+            </article>
+            <article class="metric">
+              <span class="metric-icon green">↗</span>
+              <div><strong id="metric-running">0</strong><small>Running now</small></div>
+            </article>
+            <article class="metric">
+              <span class="metric-icon amber">Ⅱ</span>
+              <div><strong id="metric-paused">0</strong><small>Paused</small></div>
+            </article>
+            <article class="metric">
+              <span class="metric-icon blue">▤</span>
+              <div><strong id="metric-memory">0 GB</strong><small>Max memory</small></div>
+            </article>
+          </section>
+
+          <section class="section-head">
+            <div>
+              <h3>Instances</h3>
+              <p>Independent deputyOS environments managed by the shared runtime.</p>
+            </div>
+            <button id="local-refresh" class="icon-button" title="Refresh">↻</button>
+          </section>
+          <section id="instances-grid" class="instance-grid"></section>
+        </main>
+
+        <main id="view-fleet" class="view hidden">
+          <section class="hero compact">
+            <div>
+              <p class="eyebrow">AUTHENTICATED OUTBOUND TUNNELS</p>
+              <h2>Your remote fleet.</h2>
+              <p>
+                Open the agent's native WebUI, an audited advanced terminal,
+                or system controls without exposing an inbound management port.
+              </p>
+            </div>
+            <button id="fleet-refresh" class="secondary">↻ Refresh fleet</button>
+          </section>
+
+          <section id="fleet-signin" class="empty-panel hidden">
+            <span class="empty-mark">◎</span>
+            <h3>Sign in to see remote deputies</h3>
+            <p>Local deputies remain available without an account.</p>
+            <button id="fleet-login-btn" class="primary">Sign in securely</button>
+          </section>
+          <section id="fleet-grid" class="instance-grid"></section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="create-dialog">
+      <form id="create-form" method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">NEW LOCAL ENVIRONMENT</p>
+            <h2>Create a deputy</h2>
+          </div>
+          <button type="button" class="dialog-close icon-button" aria-label="Close">×</button>
+        </div>
+        <label>
+          Name
+          <input id="new-name" required maxlength="48" placeholder="Research, Dev, Finance…" />
+        </label>
+        <label>
+          Profile <span class="optional">optional</span>
+          <input id="new-profile" placeholder="openclaw" />
+        </label>
+        <div class="form-grid">
+          <label>
+            vCPUs
+            <input id="new-vcpus" type="number" min="1" max="32" value="2" />
+          </label>
+          <label>
+            Minimum memory
+            <div class="input-unit"><input id="new-memory-min" type="number" min="256" value="1024" /><span>MiB</span></div>
+          </label>
+          <label>
+            Maximum memory
+            <div class="input-unit"><input id="new-memory-max" type="number" min="256" value="4096" /><span>MiB</span></div>
+          </label>
+        </div>
+        <label class="switch-row">
+          <span><strong>Automatic memory ballooning</strong><small>Return idle guest memory to the host.</small></span>
+          <input id="new-auto-balloon" type="checkbox" checked />
+        </label>
+        <div class="dialog-actions">
+          <button type="button" class="dialog-close secondary">Cancel</button>
+          <button id="create-btn" type="submit" class="primary">Create deputy</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="login-dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">REMOTE FLEET</p>
+          <h2>Sign in to deputyOS</h2>
+        </div>
+        <button class="dialog-close icon-button" aria-label="Close">×</button>
+      </div>
+      <p id="login-instruct" class="muted">
+        Use a short-lived device code. Your account token is stored in the OS keychain.
+      </p>
+      <button id="login-start-btn" class="primary full">Generate sign-in code</button>
+      <div id="login-code" class="code-box hidden">
+        <span class="field-label">YOUR CODE</span>
+        <div id="login-usercode" class="usercode mono"></div>
+        <a id="login-uri" class="verification-link" target="_blank" rel="noopener"></a>
+        <p id="login-pending" class="muted">Waiting for confirmation…</p>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast hidden" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

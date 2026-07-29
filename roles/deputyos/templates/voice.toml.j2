@@ -1,0 +1,61 @@
+{# Rendered from roles/deputyos/templates/voice.toml.j2 by
+   tasks/voice-baseline.yml. Lives at /etc/deputyos/voice.toml.
+   Reference: docs/11-roadmap.md §M6 Lane A/B/F.
+
+   Profile manifests (profiles/openclaw.toml, profiles/hermes.toml)
+   are M0-FROZEN — voice config does NOT live there. This file is
+   the runtime voice configuration source of truth; deputyos-voice-
+   relay.service reads it via /opt/deputyos/voice/voice-relay.sh.
+
+   The wizard / future voice-setup PWA card flips deputyos_voice_enabled
+   to true via a per-host overlay. Operators can also edit this file
+   directly and `systemctl restart deputyos-voice-relay`. #}
+# Managed by deputyos. Edit with care; the deputyos-voice-relay service
+# re-reads this file on restart.
+
+[voice]
+# Master switch. The systemd unit refuses to start when false; the
+# wizard / PWA voice card flips it to true after consent + mic check.
+enabled = {{ deputyos_voice_enabled | bool | string | lower }}
+
+# Wake-word: case-insensitive substring match against the first token
+# of each whisper transcription. Anything before/after is ignored.
+# Default ("agent") is profile-neutral; the wizard offers
+# "hey-molty" (OpenClaw) / "hey-hermes" (Hermes) presets — see
+# docs/14-limitations.md §Voice for the wake-word policy.
+wake_word = "{{ deputyos_voice_wake_word }}"
+
+# STT model id. One of: whisper-tiny.en, whisper-base.en, whisper-small.en.
+# Sizing per docs/14-limitations.md:
+#   - rpi5 8GB:  whisper-tiny.en (default)
+#   - rpi5 16GB: whisper-base.en
+#   - x86_64-mini-pc: whisper-small.en
+stt_model = "{{ deputyos_voice_stt_model }}"
+
+# TTS voice id. Default en_US-amy-medium (~63 MB). English-only at M6;
+# `deputyctl voice add-language <code>` ships post-M6.
+tts_voice = "{{ deputyos_voice_tts_voice }}"
+
+# ALSA device. "default" routes through the user's default soundcard;
+# pick a specific card (e.g. "plughw:1,0") via the wizard if multiple
+# audio interfaces are attached.
+audio_device = "{{ deputyos_voice_audio_device }}"
+
+[stt]
+# Paths populated by tasks/voice-baseline.yml. Operators rarely edit.
+model_path = "{{ deputyos_voice_install_root }}/{{ deputyos_voice_stt_model }}.bin"
+binary     = "{{ deputyos_voice_install_root }}/whisper-cli"
+
+[tts]
+model_path = "{{ deputyos_voice_install_root }}/piper/{{ deputyos_voice_tts_voice }}.onnx"
+binary     = "{{ deputyos_voice_install_root }}/piper"
+
+[relay]
+# The voice-relay shim talks to the message-relay socket as a
+# pre-message hook with `source = "voice"` in the payload. This is
+# convention, not a new HookKind — Lane M7 owns hooks.rs and the
+# variant set is stable at four (pre/post-message, cost-alert,
+# update-applied). See deputyctl/src/message_relay.rs.
+socket_path = "/run/deputyos/relay.sock"
+hook_kind   = "pre-message"
+source_tag  = "voice"

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.deputyos.com/schemas/deputy-inventory-v1.json",
+  "title": "deputyOS object-backed desktop inventory manifest",
+  "description": "Commit record for immutable, sharded deputy-definition segments. The highest successfully decoded epoch is the current inventory state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "account_id",
+    "desktop_id",
+    "epoch",
+    "created_unix_ms",
+    "segments",
+    "tombstones"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "account_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "desktop_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "writer_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "previous_epoch": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "tombstones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tombstone"
+      }
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    }
+  },
+  "$defs": {
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "sha256", "deputy_count", "compressed_bytes"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^accounts/[^/]+/desktops/[^/]+/inventory/h0=[0-9a-f]{2}/h1=[0-9a-f]{2}/segments/[0-9a-f]{64}\\.cbor\\.zst$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "deputy_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "compressed_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "first_deputy_id": {
+          "type": "string"
+        },
+        "last_deputy_id": {
+          "type": "string"
+        }
+      }
+    },
+    "tombstone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deputy_id", "deleted_unix_ms"],
+      "properties": {
+        "deputy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "deleted_unix_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defined", "materialised", "running", "paused"],
+      "properties": {
+        "defined": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "materialised": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "running": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paused": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

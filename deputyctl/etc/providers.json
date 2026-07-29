@@ -1,0 +1,154 @@
+{
+  "providers": [
+    {
+      "id": "openrouter",
+      "display_name": "OpenRouter",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://openrouter.ai/api/v1",
+      "key_env_var": "OPENROUTER_API_KEY",
+      "key_format": "sk-or-v1-...",
+      "default_model": "anthropic/claude-sonnet-4.6",
+      "supported_models_hint": "any model on openrouter; recommended first-time path"
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "kind": "anthropic",
+      "endpoint_default": "https://api.anthropic.com",
+      "key_env_var": "ANTHROPIC_API_KEY",
+      "key_format": "sk-ant-...",
+      "default_model": "claude-sonnet-4-6",
+      "supported_models_hint": "claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-6"
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "kind": "openai",
+      "endpoint_default": "https://api.openai.com/v1",
+      "key_env_var": "OPENAI_API_KEY",
+      "key_format": "sk-...",
+      "default_model": "gpt-4o",
+      "supported_models_hint": "gpt-4o, gpt-4o-mini, o1, o3"
+    },
+    {
+      "id": "google-ai-studio",
+      "display_name": "Google AI Studio",
+      "kind": "google",
+      "endpoint_default": "https://generativelanguage.googleapis.com/v1beta",
+      "key_env_var": "GOOGLE_AI_STUDIO_API_KEY",
+      "key_format": "AIza...",
+      "default_model": "gemini-2.0-flash",
+      "supported_models_hint": "gemini-2.0-flash (free tier exists), gemini-2.5-pro"
+    },
+    {
+      "id": "bedrock",
+      "display_name": "AWS Bedrock",
+      "kind": "bedrock",
+      "endpoint_default": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "key_env_var": "AWS_ACCESS_KEY_ID",
+      "key_format": "AKIA... (plus AWS_SECRET_ACCESS_KEY and AWS_REGION)",
+      "default_model": "anthropic.claude-sonnet-4-6",
+      "supported_models_hint": "anthropic.claude-sonnet-4-6; requires region selection"
+    },
+    {
+      "id": "nous-portal",
+      "display_name": "Nous Portal",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://inference-api.nousresearch.com/v1",
+      "key_env_var": "NOUS_PORTAL_API_KEY",
+      "key_format": "sk-nous-...",
+      "default_model": "Hermes-3-Llama-3.1-405B",
+      "supported_models_hint": "native Hermes provider; works with OpenClaw too"
+    },
+    {
+      "id": "nvidia-nim",
+      "display_name": "NVIDIA NIM",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://integrate.api.nvidia.com/v1",
+      "key_env_var": "NVIDIA_NIM_API_KEY",
+      "key_format": "nvapi-...",
+      "default_model": "nemotron-4-340b-instruct",
+      "supported_models_hint": "OpenAI-compatible endpoint"
+    },
+    {
+      "id": "ollama-cloud",
+      "display_name": "Ollama Cloud",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://api.ollama.com/v1",
+      "key_env_var": "OLLAMA_CLOUD_API_KEY",
+      "key_format": "ollama-...",
+      "default_model": "llama-3.3-70b",
+      "supported_models_hint": "hosted Ollama; no local resources needed"
+    },
+    {
+      "id": "local-ollama",
+      "display_name": "Local Ollama",
+      "kind": "openai-compatible",
+      "endpoint_default": "http://127.0.0.1:11434/v1",
+      "key_env_var": "LOCAL_OLLAMA_BASE_URL",
+      "key_format": "(URL only; no key required)",
+      "default_model": "llama3.2:3b",
+      "supported_models_hint": "offered only on offline-build images that bake in a model"
+    },
+    {
+      "id": "zai-glm",
+      "display_name": "z.ai / GLM",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://api.z.ai/api/paas/v4",
+      "key_env_var": "ZAI_API_KEY",
+      "key_format": "(z.ai API key)",
+      "default_model": "glm-4.6",
+      "supported_models_hint": "OpenAI-compatible"
+    },
+    {
+      "id": "kimi-moonshot",
+      "display_name": "Kimi / Moonshot",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://api.moonshot.cn/v1",
+      "key_env_var": "MOONSHOT_API_KEY",
+      "key_format": "sk-...",
+      "default_model": "moonshot-v1-128k",
+      "supported_models_hint": "long-context strength"
+    },
+    {
+      "id": "minimax",
+      "display_name": "MiniMax",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://api.minimaxi.com/v1",
+      "key_env_var": "MINIMAX_API_KEY",
+      "key_format": "(MiniMax API key)",
+      "default_model": "abab6.5s-chat",
+      "supported_models_hint": "global + CN endpoint selectable"
+    },
+    {
+      "id": "xiaomi-mimo",
+      "display_name": "Xiaomi MiMo",
+      "kind": "openai-compatible",
+      "endpoint_default": "https://api.mimo.xiaomi.com/v1",
+      "key_env_var": "XIAOMI_MIMO_API_KEY",
+      "key_format": "(Xiaomi MiMo API key)",
+      "default_model": "mimo-7b-rl",
+      "supported_models_hint": "RL-trained reasoning model"
+    },
+    {
+      "id": "huggingface",
+      "display_name": "Hugging Face Inference",
+      "kind": "huggingface",
+      "endpoint_default": "https://api-inference.huggingface.co",
+      "key_env_var": "HUGGINGFACE_API_KEY",
+      "key_format": "hf_...",
+      "default_model": "",
+      "supported_models_hint": "specifying a model field is required"
+    },
+    {
+      "id": "custom",
+      "display_name": "Custom OpenAI-compatible",
+      "kind": "openai-compatible",
+      "endpoint_default": "",
+      "key_env_var": "CUSTOM_OPENAI_API_KEY",
+      "key_format": "(may be empty for self-hosted)",
+      "default_model": "",
+      "supported_models_hint": "vLLM, llama.cpp server, SGLang, LocalAI, etc."
+    }
+  ]
+}

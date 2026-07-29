@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  deputyOS Unraid VM template (libvirt domain XML).
+
+  Drop this file into Unraid's VM template directory
+  (/boot/config/plugins/dynamix/templates-user/) and place the qcow2
+  at /mnt/user/domains/deputyos/deputyos.qcow2 before clicking Create
+  in the Unraid VM Manager.
+
+  See README.md in this directory for the full step-by-step.
+
+  Reference: docs/14-limitations.md §"proxmox / unraid / truenas".
+  Defaults: 2 vCPU, 2 GB RAM, q35+OVMF, virtio NIC, virtio-scsi disk.
+
+  Substitute /mnt/user/domains/deputyos/deputyos.qcow2 if you place the
+  qcow2 elsewhere. Substitute br0 for your Unraid bridge if non-default.
+-->
+<domain type="kvm">
+  <name>deputyos</name>
+  <description>deputyOS personal AI appliance — see https://www.deputyos.com</description>
+  <metadata>
+    <vmtemplate xmlns="unraid" name="Linux" icon="linux.png" os="linux"/>
+  </metadata>
+
+  <memory unit="KiB">2097152</memory>
+  <currentMemory unit="KiB">2097152</currentMemory>
+  <memoryBacking>
+    <nosharepages/>
+  </memoryBacking>
+
+  <vcpu placement="static">2</vcpu>
+
+  <cpu mode="host-passthrough" check="none" migratable="on">
+    <topology sockets="1" dies="1" cores="2" threads="1"/>
+    <cache mode="passthrough"/>
+    <feature policy="require" name="topoext"/>
+  </cpu>
+
+  <os>
+    <type arch="x86_64" machine="q35">hvm</type>
+    <loader readonly="yes" type="pflash">/usr/share/qemu/ovmf-x64/OVMF_CODE-pure-efi.fd</loader>
+    <nvram>/etc/libvirt/qemu/nvram/deputyos_VARS-pure-efi.fd</nvram>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+
+  <clock offset="utc">
+    <timer name="rtc" tickpolicy="catchup"/>
+    <timer name="pit" tickpolicy="delay"/>
+    <timer name="hpet" present="no"/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+
+  <devices>
+    <emulator>/usr/local/sbin/qemu</emulator>
+
+    <!-- Boot disk: deputyOS qcow2. Substitute the path/storage here.  -->
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2" cache="writeback" discard="unmap"/>
+      <source file="/mnt/user/domains/deputyos/deputyos.qcow2"/>
+      <target dev="hdc" bus="virtio"/>
+      <boot order="1"/>
+    </disk>
+
+    <!-- Network: virtio NIC on Unraid's br0 bridge.                 -->
+    <interface type="bridge">
+      <source bridge="br0"/>
+      <model type="virtio-net"/>
+    </interface>
+
+    <!-- Serial console — deputyOS bakes serial-getty for headless    -->
+    <!-- first boot debugging. Reachable via virsh console deputyos.  -->
+    <serial type="pty">
+      <target type="isa-serial" port="0">
+        <model name="isa-serial"/>
+      </target>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"/>
+    </console>
+
+    <!-- VirtIO channels: enable qemu-guest-agent (which deputyOS     -->
+    <!-- bakes) so Unraid can do clean shutdowns and IP probes.       -->
+    <channel type="unix">
+      <target type="virtio" name="org.qemu.guest_agent.0"/>
+    </channel>
+
+    <!-- Headless: no graphics. Use the serial console above for     -->
+    <!-- direct guest access. Web wizard is on :8088 over the bridge. -->
+    <graphics type="vnc" port="-1" autoport="yes" listen="0.0.0.0">
+      <listen type="address" address="0.0.0.0"/>
+    </graphics>
+
+    <video>
+      <model type="qxl" ram="65536" vram="65536" vgamem="16384" heads="1" primary="yes"/>
+    </video>
+
+    <memballoon model="virtio">
+      <stats period="5"/>
+    </memballoon>
+  </devices>
+</domain>

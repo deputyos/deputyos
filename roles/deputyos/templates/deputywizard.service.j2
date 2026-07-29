@@ -1,0 +1,66 @@
+# Managed by deputyos. Rendered from
+# roles/deputyos/templates/deputywizard.service.j2 by
+# tasks/wizard-baseline.yml. Reference: docs/01-getting-started.md
+# §"first boot" and docs/09-security.md §wizard.
+#
+# HARDENING TRADE-OFF (read before tightening):
+#   The wizard runs as root. It has to:
+#     * write /etc/hostname, /etc/timezone, /etc/deputyos/...
+#     * call hostnamectl / timedatectl / systemctl
+#     * generate /run/deputyos/wizard.token (mode 0600)
+#   Running as root + axum is a hardening regression we accept ONLY for
+#   first boot. Once the user finishes the wizard and the state file
+#   marks step="done", the ConditionPathExists guard below stops the
+#   unit from auto-starting on subsequent boots, so the regression is
+#   bounded to one boot.
+#
+#   TODO(M3-rest): wizard runs as root only on first boot; tighten with
+#   a polkit policy + a small setuid `deputyctl-bootstrap` helper that
+#   handles only the privileged surface, and let deputywizard run as the
+#   `agent` user thereafter. Track in M3.
+[Unit]
+Description=deputyOS first-boot setup wizard
+Documentation=https://github.com/dipankarn/deputyOS/blob/main/docs/01-getting-started.md
+After=network-online.target
+Wants=network-online.target
+# Don't auto-start once the wizard has been completed. The wizard's
+# apply step writes /var/lib/deputyos/wizard-state.json with step="done";
+# the file's existence here gates the unit. Re-running the wizard on a
+# completed system is a manual `systemctl start deputywizard` away.
+ConditionPathExists=!/var/lib/deputyos/wizard-state.json
+
+[Service]
+Type=simple
+# Root-only because the wizard mutates /etc and pokes hostnamectl. See
+# the hardening note at the top.
+User=root
+Group=root
+RuntimeDirectory=deputyos
+RuntimeDirectoryMode=0755
+StateDirectory=deputyos
+StateDirectoryMode=0755
+ExecStart=/usr/local/bin/deputywizard serve \
+  --port {{ deputyos_wizard_port }} \
+  --bind {{ deputyos_wizard_bind }} \
+  --production
+Restart=on-failure
+RestartSec=5
+
+# Hardening (best effort — see top-of-file note for why we can't go
+# all-in). ProtectSystem=strict is incompatible with writing /etc, so
+# we use ProtectSystem=full and explicitly grant ReadWritePaths.
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/etc/deputyos /etc/hostname /etc/timezone /var/lib/deputyos /run/deputyos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

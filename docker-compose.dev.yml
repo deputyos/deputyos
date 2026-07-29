@@ -1,0 +1,62 @@
+services:
+  # Local release CDN — serves dist/ (manifest.json + signed images + signed
+  # launcher) over HTTP so `deputyos-desktop install` can pull from a "remote"
+  # that's really just this repo's build output. nginx serves ./dist at root,
+  # matching the relative `url`/`minisig_url` paths scripts/manifest.sh emits.
+  # See documentation/docs/how-to/develop/run-locally.md.
+  cdn:
+    image: nginx:alpine
+    ports:
+      - "8090:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/manifest.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../api-deputyos-com
+      dockerfile: deploy/caprover/api/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      API_BIND: 0.0.0.0:3000
+      # Point the API at the local cdn service instead of the prod CDN, so a
+      # fully-local loop (api + cdn + installer) has no external dependency.
+      API_CDN_BASE: http://localhost:8090
+      API_CHANNEL: dev
+      API_REPO: deputyos/deputyos
+      API_DB_PATH: /data/accounts.db
+      OBJECT_LAKE_DIR: /data/object-lake
+      AUDIT_WAREHOUSE_DIR: /data/object-lake
+      BUILD_WEBHOOK_SECRET: dev-build-secret
+      EMAIL_FROM: deputyOS <noreply@deputyos.com>
+      SES_REGION: us-east-1
+      RUST_LOG: info,api=debug
+    volumes:
+      - api-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  www:
+    build:
+      context: ../www-deputyos-com
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4321:4321"
+    environment:
+      PUBLIC_API_BASE: http://localhost:3000
+      HOST: 0.0.0.0
+      PORT: 4321
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  api-data:

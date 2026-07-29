@@ -1,0 +1,62 @@
+---
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+
+- name: Reload ufw
+  ansible.builtin.command: ufw reload
+  changed_when: true
+
+- name: Reload AppArmor
+  ansible.builtin.service:
+    name: apparmor
+    state: reloaded
+
+- name: Reparse AppArmor profiles
+  # Triggered by Lane F when a per-profile AppArmor file changes.
+  # apparmor_parser -r reloads in-place without a service restart.
+  ansible.builtin.command: apparmor_parser -r -W /etc/apparmor.d/
+  changed_when: true
+
+- name: Restart fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+
+- name: Restart sshd config check
+  # Validate but do NOT restart inside the bake — the next boot picks the
+  # new sshd_config up cleanly and we don't risk locking the bake session.
+  ansible.builtin.command: sshd -t
+  changed_when: false
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Reload Avahi
+  # Reload picks up changes to /etc/avahi/services/*.service without
+  # dropping in-flight resolutions. Use restart only for daemon-conf
+  # changes; the service-file changes are reload-safe.
+  ansible.builtin.service:
+    name: avahi-daemon
+    state: reloaded
+
+- name: Restart deputywizard
+  # Bake-time only fires when the unit file or binary changes; the unit
+  # is gated to first-boot via ConditionPathExists, so a bake-time
+  # restart is harmless (systemd will skip if the gate is closed).
+  ansible.builtin.systemd:
+    name: deputywizard.service
+    state: restarted
+    daemon_reload: true
+  failed_when: false
+
+- name: Mounts reload udev
+  # Re-read /etc/udev/rules.d/ after the deputyOS rule lands. udevadm
+  # control --reload then trigger replays add events on attached devices,
+  # which is what the helper expects.
+  ansible.builtin.command: "{{ item }}"
+  with_items:
+    - udevadm control --reload
+    - udevadm trigger
+  changed_when: true

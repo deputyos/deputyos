@@ -1,0 +1,17 @@
+# dist/ — local mirror of the release CDN.
+#
+# Populated by `make publish-local`. Layout mirrors what lands at
+# https://cdn.getagentos.com/<channel>/ once M4 ships the real CDN:
+#
+#   dist/
+#   ├── manifest.json                # latest channel-default manifest
+#   ├── manifest.json.minisig
+#   ├── pubkey.minisign              # the dev/release signing pubkey
+#   ├── <release_version>/
+#   │   ├── manifest.json            # versioned snapshot (immutable)
+#   │   ├── manifest.json.minisig
+#   │   ├── agentos-<profile>-<target>-<version>-<channel>.<fmt>
+#   │   ├── …                        # .sha256 and .minisig siblings
+#
+# `agentctl update --check` defaults to file://./dist/manifest.json in dev.
+# Same code path works against an HTTPS URL once the CDN is up.

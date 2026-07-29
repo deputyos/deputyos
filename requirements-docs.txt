@@ -1,0 +1,5 @@
+# Pin the docs toolchain so `mkdocs build --strict` reproduces between
+# contributor laptops and CI. Bumped manually; deputyos-track does not
+# touch this file.
+mkdocs-material>=9.5,<10
+pymdown-extensions>=10.7

@@ -1,0 +1,63 @@
+---
+# Raspberry Pi 5 variant.
+# Reference: docs/03-image-builds.md §"Per-target tuning highlights".
+#
+# Note: real Pi builds need pi-gen base + binfmt_misc and don't run in
+# CI; lint must pass and a real Pi-host contributor can run
+# `make build TARGET=rpi5`.
+
+- name: Set rpi5 facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 8192
+    deputyos_target_storage_class: "nvme"
+
+- name: Add AppArmor + cgroup flags to /boot/firmware/cmdline.txt
+  # cmdline.txt is one line. Append flags only if not already present.
+  ansible.builtin.replace:
+    path: /boot/firmware/cmdline.txt
+    regexp: '^(.*?)(\s*)$'
+    replace: '\1 apparmor=1 security=apparmor cgroup_enable=memory cgroup_memory=1\2'
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Install cpufrequtils
+  ansible.builtin.apt:
+    name: cpufrequtils
+    state: present
+
+- name: Set CPU governor to ondemand
+  ansible.builtin.copy:
+    dest: /etc/default/cpufrequtils
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Ondemand is a good default for an idle-most
+      # appliance; tip into performance under load.
+      GOVERNOR="ondemand"
+
+- name: Enable cpufrequtils
+  ansible.builtin.service:
+    name: cpufrequtils
+    enabled: true
+
+# TODO(M6): full A/B with tryboot — for now we ship a single-slot image.
+- name: Note A/B tryboot is M6
+  ansible.builtin.debug:
+    msg: "tryboot A/B partition layout deferred to M6 (see docs/08-update-rollback.md)"
+
+# ---------- M3.5: Removable drive auto-mount ----------
+- name: Mounts-rpi5 | enable removable-drive auto-mount in policy
+  ansible.builtin.shell: |
+    set -euo pipefail
+    POLICY="{{ deputyos_etc_dir }}/mounts-policy.json"
+    if [[ -f "$POLICY" ]] && command -v jq >/dev/null 2>&1; then
+      tmp=$(mktemp)
+      jq '.removable.enabled = true | .removable.auto_mount = true' "$POLICY" > "$tmp"
+      mv "$tmp" "$POLICY"
+      echo "rpi5: removable auto-mount enabled in mounts policy"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false

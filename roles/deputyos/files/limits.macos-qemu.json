@@ -1,0 +1,62 @@
+{
+  "_comment": "Per-target limits for macos-qemu. Copied to /etc/deputyos/limits.json at bake time. Schema lives in deputyctl/src/limits.rs. See docs/14-limitations.md \u00a7'macos-qemu' for the source-of-truth narrative. This is a DEMO-ONLY target \u2014 the qcow2 boots in UTM (Apple Silicon) or OrbStack/qemu (Intel) with TCG emulation.",
+  "target": "macos-qemu",
+  "tier": "low",
+  "ram_mb": 2048,
+  "ram_class": "low",
+  "storage_class": "qcow2",
+  "cloud": "macos",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": false,
+    "channels_heavy": [
+      "telegram",
+      "slack"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook",
+      "discord-voice"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "demo-only-target",
+      "reason": "macos-qemu is a try-it-out target. QEMU TCG emulation on macOS hosts (especially Intel) throttles guest CPU 5-10x vs native; not suitable for production agent workloads.",
+      "unblock": "Run deputyOS on real hardware: rpi5 8GB+, x86_64-mini-pc, or a cloud target (digitalocean / oracle-arm-free)."
+    },
+    {
+      "id": "no-voice",
+      "reason": "QEMU on macOS does not pass /dev/snd reliably; CPU throttling makes wake-word detection unworkable even if it did.",
+      "unblock": "rpi5 8GB+ or x86_64-mini-pc for on-device voice."
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "2 GB RAM allocation + emulated CPU make even 1B Q4 models unworkably slow.",
+      "unblock": "rpi5 8GB+ for 1B local; x86_64-mini-pc for 3B local; or cloud providers."
+    },
+    {
+      "id": "no-clamav-daemon",
+      "reason": "clamd RSS (~900 MB) exceeds the 2 GB launcher default; on-demand clamscan + Magika is used instead.",
+      "unblock": "Increase the qemu memory allocation in run-utm.sh / run-orbstack.sh, or use rpi5 8GB+."
+    },
+    {
+      "id": "no-ab-updates",
+      "reason": "There is no A/B partition on a qcow2 demo image; rollback is host-snapshot of the qcow2 file.",
+      "unblock": "Production targets (rpi5, x86_64-mini-pc, digitalocean) have proper A/B or snapshot rollback."
+    },
+    {
+      "id": "no-npu-acceleration",
+      "reason": "Apple Neural Engine and Apple Silicon GPU are not exposed inside QEMU/UTM guests.",
+      "unblock": "Run native macOS apps for Apple-Silicon-accelerated inference; deputyOS targets Linux."
+    },
+    {
+      "id": "no-whatsapp-cloud-webhook",
+      "reason": "WhatsApp Cloud webhook RSS exceeds the 2 GB low-tier headroom.",
+      "unblock": "rpi5 8GB+, x86_64-mini-pc, or a cloud target."
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "rich"
+}

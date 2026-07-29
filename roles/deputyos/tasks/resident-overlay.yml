@@ -1,0 +1,77 @@
+---
+# Generic, fail-closed installer contract for private deputyos-core artefacts.
+# No resident implementation is present in this public repository. Every
+# official downloadable image reaches this task; only explicit, unreleasable
+# agentless development bases may skip it.
+
+- name: "Resident agent: verify staged artefacts"
+  ansible.builtin.stat:
+    path: "{{ deputyos_core_staging_dir }}/{{ item }}"
+  loop:
+    - deputyd
+    - deputy-terminal
+    - templates/deputyd.service.j2
+    - templates/deputy-terminal.service.j2
+    - templates/deputyos-workloads.slice.j2
+    - templates/deputyos-reconcile.service.j2
+    - templates/deputyos-reconcile.timer.j2
+    - templates/deputyos-tunnel.service.j2
+    - templates/deputyos-command-poller.service.j2
+    - MANIFEST.sha256
+  register: _deputyos_core_files
+  delegate_to: localhost
+  become: false
+
+- name: "Resident agent: fail closed when staging is incomplete"
+  ansible.builtin.assert:
+    that:
+      - _deputyos_core_files.results | map(attribute='stat.exists') | min
+    fail_msg: "official images require a complete deputyos-core staging overlay"
+
+- name: "Resident agent: install binaries"
+  ansible.builtin.copy:
+    src: "{{ deputyos_core_staging_dir }}/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - deputyd
+    - deputy-terminal
+
+- name: "Resident agent: install systemd units"
+  ansible.builtin.template:
+    src: "{{ deputyos_core_staging_dir }}/templates/{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - deputyd.service
+    - deputy-terminal.service
+    - deputyos-workloads.slice
+    - deputyos-reconcile.service
+    - deputyos-reconcile.timer
+    - deputyos-tunnel.service
+    - deputyos-command-poller.service
+
+- name: "Resident agent: install QEMU guest integration"
+  ansible.builtin.apt:
+    name: qemu-guest-agent
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  failed_when: false
+
+- name: "Resident agent: enable services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    daemon_reload: true
+  loop:
+    - deputyd.service
+    - deputy-terminal.service
+    - deputyos-reconcile.timer
+    - deputyos-tunnel.service
+    - deputyos-command-poller.service
+  failed_when: false

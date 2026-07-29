@@ -1,0 +1,29 @@
+# /etc/udev/rules.d/99-deputyos-removable.rules
+#
+# Auto-mount removable drives (USB / SD) under /mnt/deputyos/<label-or-uuid>
+# when the policy at /etc/deputyos/mounts-policy.json allows it.
+#
+# The deputyos-mount-removable.sh helper enforces:
+#   - mount options nosuid,nodev,noexec for unknown filesystems
+#   - mode (ro|rw) per the policy file
+#   - LUKS volumes refused (until the user unlocks via cryptsetup)
+#
+# When the policy is disabled the helper exits 0 silently so udev doesn't
+# log noise.
+
+ACTION!="add", GOTO="deputyos_removable_end"
+SUBSYSTEM!="block", GOTO="deputyos_removable_end"
+ENV{ID_BUS}!="usb", GOTO="deputyos_removable_end"
+ENV{ID_FS_USAGE}!="filesystem", GOTO="deputyos_removable_end"
+
+RUN+="/usr/local/lib/deputyos/deputyos-mount-removable.sh add %k"
+
+LABEL="deputyos_removable_end"
+
+ACTION!="remove", GOTO="deputyos_removable_remove_end"
+SUBSYSTEM!="block", GOTO="deputyos_removable_remove_end"
+ENV{ID_BUS}!="usb", GOTO="deputyos_removable_remove_end"
+
+RUN+="/usr/local/lib/deputyos/deputyos-mount-removable.sh remove %k"
+
+LABEL="deputyos_removable_remove_end"

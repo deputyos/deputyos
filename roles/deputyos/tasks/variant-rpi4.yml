@@ -1,0 +1,170 @@
+---
+# Raspberry Pi 4 variant.
+# Reference: docs/03-image-builds.md §"Per-target tuning highlights"
+# (rpi4 column) and docs/14-limitations.md §"Pi 4 (4 GB)".
+#
+# Pi 4 is a constrained target: 4GB conservative default, no local LLM,
+# no voice, no persistent ClamAV daemon (on-demand `clamscan` instead).
+# Same toolchain as rpi5 (pi-gen + packer-builder-arm) but A72 cores,
+# bcm2711 firmware, U-Boot bootcount A/B (no `tryboot`), passive
+# cooling only.
+#
+# Like rpi5, this builds against a real Pi host (binfmt_misc + qemu-
+# user-static) and is not smoke-tested in CI. Lint must pass and
+# `ansible-playbook --syntax-check` with hw=rpi4 must succeed.
+#
+# Future split: rpi4-4gb vs rpi4-8gb. The 8GB SKU could in principle
+# run clamd, but docs/14 currently lists "no daemon" for both — keep
+# the conservative single-variant default until docs/14 is updated.
+
+- name: Set rpi4 facts
+  ansible.builtin.set_fact:
+    # On-demand `clamscan` only (timer below). docs/14: Pi 4 4GB and
+    # 8GB both ship without persistent clamd.
+    deputyos_clamav_daemon_enabled: false
+    # Conservative 4GB-class default. The bake-time fact drives
+    # /etc/deputyos/limits.json and downstream `deputyctl doctor`
+    # thresholds. Real RAM is queried at runtime separately.
+    deputyos_target_ram_mb: 4096
+    # Worst-case storage class — SD card. User can override at first
+    # boot if they're on a USB3 SSD (recommended per docs/14).
+    deputyos_target_storage_class: "sd"
+
+- name: Add AppArmor + cgroup flags to /boot/firmware/cmdline.txt
+  # Same one-line append as rpi5 — cmdline.txt path is identical on
+  # Pi 4 (firmware partition mounted at /boot/firmware on Bookworm+).
+  ansible.builtin.replace:
+    path: /boot/firmware/cmdline.txt
+    regexp: '^(.*?)(\s*)$'
+    replace: '\1 apparmor=1 security=apparmor cgroup_enable=memory cgroup_memory=1\2'
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Install Pi-4-family kernel package
+  # docs/03 row: rpi4 -> linux-image-rpi-2711 (bcm2711 SoC family).
+  # Pi 5's linux-image-rpi-2712 will not boot on Pi 4 silicon.
+  ansible.builtin.apt:
+    name: linux-image-rpi-2711
+    state: present
+
+- name: Install cpufrequtils
+  ansible.builtin.apt:
+    name: cpufrequtils
+    state: present
+
+- name: Set CPU governor to ondemand (A72-tuned)
+  ansible.builtin.copy:
+    dest: /etc/default/cpufrequtils
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Pi 4 is Cortex-A72; ondemand is the right
+      # default for an idle-most appliance. Crypto build flags
+      # (-march=armv8-a+crypto) live in profile bakes, not here.
+      GOVERNOR="ondemand"
+
+- name: Enable cpufrequtils
+  ansible.builtin.service:
+    name: cpufrequtils
+    enabled: true
+
+- name: Install ClamAV (on-demand mode — no daemon)
+  # security-baseline.yml installs clamav-daemon for daemon-mode hosts;
+  # we can't modify that file, so install the on-demand `clamscan`
+  # CLI directly here. The package is just `clamav` (CLI without the
+  # daemon).
+  ansible.builtin.apt:
+    name: clamav
+    state: present
+
+- name: Drop on-demand clamscan timer (substitute for clamd on Pi 4)
+  # Daily on-demand scan of /home and /var/lib/deputyos — substitute
+  # for the persistent daemon docs/14 says rpi4 can't run.
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-clamscan.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos — Pi 4 substitute for clamav-daemon.
+      [Unit]
+      Description=deputyOS — on-demand ClamAV scan
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      Nice=15
+      IOSchedulingClass=idle
+      ExecStart=/usr/bin/clamscan --infected --recursive \
+        --quiet --log=/var/log/deputyos-clamscan.log \
+        /home /var/lib/deputyos
+
+- name: Drop on-demand clamscan timer unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-clamscan.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Daily scan with a 30-min randomized delay
+      # so a fleet of Pi 4s doesn't stampede on the same wall-clock.
+      [Unit]
+      Description=deputyOS — daily on-demand ClamAV scan
+
+      [Timer]
+      OnCalendar=daily
+      RandomizedDelaySec=30m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable on-demand clamscan timer
+  ansible.builtin.systemd:
+    name: deputyos-clamscan.timer
+    enabled: true
+    daemon_reload: true
+
+- name: Drop wifi-power-save-off oneshot unit
+  # Same oneshot as rpi5 / x86_64-mini-pc. WiFi power-save introduces
+  # multi-second latency spikes that break voice + chat.
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-wifi-powersave-off.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos.
+      [Unit]
+      Description=deputyOS — disable WiFi power-save
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/sh -c 'for f in /sys/class/net/wl*/device/power/control; \
+        do [ -e "$f" ] && echo on > "$f"; done; true'
+      RemainAfterExit=true
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable wifi-power-save-off oneshot
+  ansible.builtin.systemd:
+    name: deputyos-wifi-powersave-off.service
+    enabled: true
+    daemon_reload: true
+
+# TODO(M6): U-Boot bootcount A/B for Pi 4. The Pi 4 doesn't have Pi 5's
+# `tryboot` firmware path; A/B for rpi4 will use U-Boot + bootcount per
+# docs/03 row. For now we ship a single-slot image — same level of stub
+# as variant-rpi5.yml's tryboot comment.
+- name: Note U-Boot bootcount A/B is M6
+  ansible.builtin.debug:
+    msg: "U-Boot + bootcount A/B for Pi 4 deferred to M6 (see docs/08-update-rollback.md)"
+
+# Thermal: docs/03 says "passive only; warn on throttle". The kernel
+# already logs throttle events to dmesg; deputyctl doctor surfaces them
+# at runtime. No bake-time work needed.
+- name: Note Pi 4 is passive-cooling-only
+  ansible.builtin.debug:
+    msg: "Pi 4 thermal: passive cooling assumed; deputyctl doctor warns on throttle (M3)"

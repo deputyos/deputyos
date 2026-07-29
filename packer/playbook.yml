@@ -1,0 +1,9 @@
+---
+# Single Packer-invoked playbook. Hardware-specific behaviour is gated
+# inside roles/deputyos via Ansible `when:` on deputyos_hw / deputyos_cloud.
+- name: Provision deputyOS image
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: deputyos

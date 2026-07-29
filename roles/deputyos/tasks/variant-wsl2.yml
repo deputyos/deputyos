@@ -1,0 +1,142 @@
+---
+# WSL2 variant — Microsoft owns the kernel, so this variant skips
+# everything kernel/bootloader/firmware-related. WSL provides the
+# kernel, mounts /init from its own initramfs, and exposes a slim
+# systemd via `systemd=true` in /etc/wsl.conf.
+#
+# Reference: docs/03-image-builds.md (wsl2 row) and
+# docs/14-limitations.md §"wsl2".
+#
+# Notable diffs from the qemu-x86_64 variant:
+#   - clamd disabled: WSL2's distros default to no-systemd; even with
+#     systemd=true, daemon-mode services are unreliable across distro
+#     start/stop cycles. We use on-demand clamscan instead.
+#   - No GRUB / no kernel cmdline / no bootloader work. WSL2 has no
+#     bootloader.
+#   - No serial getty. WSL2 attaches a pty.
+#   - No zram. WSL2 has its own swap, sized by Windows.
+#   - cloud-init NOT used; /etc/wsl.conf is the equivalent and is
+#     written by scripts/wsl2-build.sh at bake time.
+#   - Audio is NOT plumbed. /dev/snd is not passed by default; voice
+#     features are off (per docs/14).
+
+- name: Set wsl2 facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: false
+    deputyos_target_ram_mb: 8192
+    deputyos_target_storage_class: "ntfs"
+    deputyos_cloud: "wsl2"
+
+- name: Note voice/audio is unavailable in WSL2 default config
+  ansible.builtin.debug:
+    msg: >-
+      WSL2 does not pass /dev/snd by default; voice features (wake-word,
+      TTS) are disabled in this image. See docs/14-limitations.md §wsl2.
+
+- name: Mark image as WSL2-hosted
+  # Marker file lets `deputyctl limits` and the wizard discover the
+  # virtualization context without having to probe the kernel.
+  ansible.builtin.copy:
+    dest: /etc/deputyos/host
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      wsl2
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"
+
+# /etc/wsl.conf is written by scripts/wsl2-build.sh outside the role
+# (the role can't reliably reach it from inside systemd-nspawn). The
+# debug note here keeps the source-of-truth visible to readers.
+- name: Note /etc/wsl.conf is bake-time, not role-time
+  ansible.builtin.debug:
+    msg: >-
+      /etc/wsl.conf is written by scripts/wsl2-build.sh at bake time
+      (default user=agent, systemd=true, appendWindowsPath=false).
+
+# Skipping intentionally: GRUB cmdline, kernel package, bootloader,
+# zram, serial-getty, firmware blobs. Microsoft owns the kernel; WSL2
+# does not boot via GRUB or U-Boot.
+
+# ---------- M3.5: Host-FS passthrough ----------
+#
+# WSL2 automatically mounts Windows drives under /mnt/c, /mnt/d, etc.
+# We detect those and generate per-folder options for the policy so the
+# wizard's "Where can the agent see your files?" step can offer them.
+# Nothing is mounted by default — the user opts in via the wizard (or
+# `deputyctl mounts add`) and the policy gates everything.
+
+- name: Mounts-wsl2 | detect /mnt/c (and other Windows drives)
+  ansible.builtin.find:
+    paths: /mnt
+    patterns: '[a-z]'
+    file_type: directory
+  register: _deputyos_wsl2_mnt_drives
+  when: deputyos_hw == "wsl2"
+
+- name: Mounts-wsl2 | note detected Windows drives
+  ansible.builtin.debug:
+    msg: "WSL2 host drives: {{ _deputyos_wsl2_mnt_drives.files | map(attribute='path') | list | join(', ') }}"
+  when:
+    - deputyos_hw == "wsl2"
+    - _deputyos_wsl2_mnt_drives.files | length > 0
+
+- name: Mounts-wsl2 | drop wsl2-mount-suggestions.json for the wizard
+  ansible.builtin.copy:
+    dest: "{{ deputyos_etc_dir }}/wsl2-drives.json"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "$schema": "https://www.deputyos.com/schemas/wsl2-drives-v1.json",
+        "drives": {{ _deputyos_wsl2_mnt_drives.files | default([]) | map(attribute='path') | list | to_json }}
+      }
+  when: deputyos_hw == "wsl2"
+
+- name: Mounts-wsl2 | seed suggested host-FS mounts in mounts-policy (idempotent)
+  ansible.builtin.script:
+    cmd: |
+      #!/bin/bash
+      # Seed WSL2 host folders as suggested mounts. Reads /etc/deputyos/wsl2-drives.json
+      # and writes draft entries to the policy only if no mounts exist yet.
+      set -eu
+      POLICY="{{ deputyos_etc_dir }}/mounts-policy.json"
+      DRIVES="{{ deputyos_etc_dir }}/wsl2-drives.json"
+      if [[ ! -f "$POLICY" ]] || [[ ! -f "$DRIVES" ]]; then exit 0; fi
+      if ! command -v jq >/dev/null 2>&1; then exit 0; fi
+      existing=$(jq '.host_fs | length' "$POLICY" 2>/dev/null || echo 0)
+      if (( existing > 0 )); then exit 0; fi
+      # Generate suggested entries for each drive. We only suggest a few
+      # well-known folders per drive.
+      drives=$(jq -r '.drives[]' "$DRIVES" 2>/dev/null || true)
+      tmp=$(mktemp)
+      jq --argjson drives "$(echo "$drives" | jq -R -s 'split("\n") | map(select(length>0))')" '
+        .host_fs = ($drives | map({
+          id: ("wsl2-" + (. | ltrimstr("/mnt/"))),
+          host_path: .,
+          guest_path: ("/mnt/deputyos/" + (. | ltrimstr("/mnt/"))),
+          mode: "ro"
+        }))
+      ' "$POLICY" > "$tmp"
+      mv "$tmp" "$POLICY"
+      echo "wsl2: seeded $(( $(jq '.drives | length' "$DRIVES" 2>/dev/null || echo 0) )) host-FS mount suggestion(s)"
+  args:
+    executable: /usr/bin/env bash
+  when:
+    - deputyos_hw == "wsl2"
+    - _deputyos_wsl2_mnt_drives.files | length > 0
+  changed_when: false
+  failed_when: false

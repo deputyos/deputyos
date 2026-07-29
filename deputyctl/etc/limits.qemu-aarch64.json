@@ -1,0 +1,33 @@
+{
+  "_comment": "Sample limits file for the qemu-aarch64 smoke target. The Lane B build pipeline copies the variant-appropriate file to /etc/deputyos/limits.json at bake time. deputyctl reads from $DEPUTYOS_LIMITS_FILE, falling back to /etc/deputyos/limits.json, falling back to this dev path. Schema lives in deputyctl/src/limits.rs.",
+  "target": "qemu-aarch64",
+  "tier": "standard",
+  "ram_mb": 4096,
+  "ram_class": "standard",
+  "storage_class": "ssd",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": ["telegram", "slack", "discord"],
+    "channels_disabled_by_ram": ["whatsapp-cloud-webhook"]
+  },
+  "limitations": [
+    {
+      "id": "no-local-llm",
+      "reason": "RAM tier 'standard' below local-LLM threshold (8GB)",
+      "unblock": "Pi 5 8GB or larger; or run model via cloud provider"
+    },
+    {
+      "id": "no-voice",
+      "reason": "qemu emulation makes wake-word and TTS unworkably slow",
+      "unblock": "rpi5 8GB+ or x86_64-mini-pc"
+    },
+    {
+      "id": "no-whatsapp-cloud-webhook",
+      "reason": "WhatsApp Cloud webhook RSS exceeds standard tier headroom",
+      "unblock": "upgrade to high-RAM tier"
+    }
+  ]
+}

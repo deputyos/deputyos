@@ -1,0 +1,13 @@
+---
+# Per-directory yamllint override for cloud-init recipes.
+#
+# cloud-init requires the first line of every config file to be the
+# literal token `#cloud-config` (no space after `#`). The repo-root
+# `.yamllint` enforces `comments: require-starting-space`, so we relax
+# that single rule here. All other repo-wide rules still apply.
+extends: ../.yamllint
+
+rules:
+  comments:
+    require-starting-space: false
+    min-spaces-from-content: 1

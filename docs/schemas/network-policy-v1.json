@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://www.deputyos.com/schemas/network-policy-v1.json",
+  "title": "deputyOS network policy",
+  "description": "Schema for /etc/deputyos/network-policy.json — the single source of truth for the device's network-egress posture. Read + mutated by `deputyctl network` and rendered into an nftables ruleset (/etc/nftables.conf) by the Ansible role. On an AIRGAP=1 build the airgap baseline drops a file with mode=airgap + set_at_build_time=true. Schema version 1; bump on breaking changes.",
+  "type": "object",
+  "required": ["mode"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "https://www.deputyos.com/schemas/network-policy-v1.json",
+      "description": "JSON Schema URL. Written so editors + future consumers can validate. The `deputyctl::network::Policy` struct defaults this when absent."
+    },
+    "mode": {
+      "enum": ["open", "whitelist", "airgap"],
+      "description": "Egress posture. `open` = unrestricted (the default for non-airgap builds). `whitelist` = allow only `allow_hosts`, enforced by an nftables output chain `policy drop` plus a resolved-IP allow rule per host (see the egress threat model for the DNS-only, not-SNI limitation). `airgap` = deny everything except RFC1918 + mDNS + the local DNS resolver."
+    },
+    "allow_hosts": {
+      "type": "array",
+      "default": [],
+      "description": "Hosts permitted in `whitelist` mode. Ignored in `open` (no restriction) and `airgap` (deny-by-default) modes. Entries are free-form hostnames or IPs the operator chose to allow.",
+      "items": { "type": "string" }
+    },
+    "set_at_build_time": {
+      "type": "boolean",
+      "default": false,
+      "description": "True if the policy was written by the image bake (the airgap baseline). Flipped to false the first time the operator mutates it via `deputyctl network …`, so the dashboard can distinguish baked from hand-edited."
+    },
+    "tier": {
+      "type": ["string", "null"],
+      "description": "Bake-time tier the policy was written for (e.g. lean, standard, rich). Informational; set by the airgap baseline."
+    },
+    "hw": {
+      "type": ["string", "null"],
+      "description": "Bake-time hardware target (e.g. rpi4, qemu-aarch64). Informational; set by the airgap baseline."
+    },
+    "profile": {
+      "type": ["string", "null"],
+      "description": "Active profile id the policy was written for (e.g. openclaw). Informational; set by the airgap baseline."
+    }
+  }
+}

@@ -1,0 +1,152 @@
+---
+# Wizard baseline — Phase 5 Lane B.
+#
+# Bakes:
+#   1. deputywizard release binary into /usr/local/bin/deputywizard
+#   2. deputywizard.service systemd unit (gated; runs only on first boot)
+#   3. deputyos-qr-on-tty.service (prints wizard URL+QR on tty1+console)
+#   4. /etc/deputyos/wizard-trust.pub placeholder for mutual auth (M3)
+#
+# References: docs/01-getting-started.md, docs/09-security.md §wizard.
+# scripts/build.sh stages the binary at deputyos_deputywizard_path
+# (= {{ deputyos_staging_dir }}/deputywizard) — same pattern as deputyctl.
+
+- name: Stat staged deputywizard binary
+  ansible.builtin.stat:
+    path: "{{ deputyos_deputywizard_path }}"
+  register: deputyos_deputywizard_stat
+  delegate_to: localhost
+  become: false
+
+- name: Fail clearly if deputywizard staging is missing
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputywizard_stat.stat.exists
+    fail_msg: >-
+      deputywizard not staged at {{ deputyos_deputywizard_path }} —
+      see scripts/build.sh (it should run
+      `cargo build --release --bin deputywizard` and copy the artefact
+      into the staging dir alongside deputyctl).
+
+- name: Install deputywizard binary
+  ansible.builtin.copy:
+    src: "{{ deputyos_deputywizard_path }}"
+    dest: /usr/local/bin/deputywizard
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart deputywizard
+
+- name: Drop deputywizard.service unit
+  ansible.builtin.template:
+    src: deputywizard.service.j2
+    dest: /etc/systemd/system/deputywizard.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart deputywizard
+
+- name: Drop deputyos-qr-on-tty.service unit (skipped on cloud + WSL2)
+  ansible.builtin.template:
+    src: deputyos-qr-on-tty.service.j2
+    dest: /etc/systemd/system/deputyos-qr-on-tty.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+- name: Enable deputywizard.service (everywhere — runs only on first boot)
+  # The unit's ConditionPathExists guard skips runs once the wizard
+  # state file marks step="done"; enabling it everywhere is safe and
+  # gives cloud users the same "first boot opens the wizard" UX.
+  # On fly-machines (no systemd) this fails harmlessly.
+  ansible.builtin.systemd:
+    name: deputywizard.service
+    enabled: true
+    daemon_reload: true
+  failed_when: false
+
+- name: Enable deputyos-qr-on-tty.service (skipped on cloud + WSL2)
+  ansible.builtin.systemd:
+    name: deputyos-qr-on-tty.service
+    enabled: true
+    daemon_reload: true
+  when: deputyos_hw not in deputyos_cloudish_hw
+  failed_when: false
+
+# Wizard mutual-auth placeholder. Lane W's wizard generates a per-host
+# token and writes it to /run/deputyos/wizard.token at startup; this
+# trust file is a forward slot for M3-rest where the wizard verifies
+# a client pubkey before accepting privileged ops.
+- name: Bake wizard mutual-auth trust file (placeholder)
+  ansible.builtin.copy:
+    dest: "{{ deputyos_etc_dir }}/wizard-trust.pub"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+    content: |
+      # TODO(M3-rest): wizard mutual auth — populated by
+      # `deputyctl wizard trust <pubkey>` once Lane S ships the helper.
+      # Empty file means "no client pubkey trusted yet"; the wizard
+      # falls back to its random per-boot token.
+
+# ---- M9.6: AccountOwner remote-wizard orchestration ----
+#
+# Bake the API RSA public key (used by wizard --account-owner to validate the
+# owner JWT) + the post-first-boot wizard unit. The first-boot deputywizard.service
+# runs in Token mode and stops auto-starting once wizard-state.json exists;
+# deputyos-remote-wizard.service is gated on the INVERSE condition so it takes
+# over on the boot after first boot completes, serving the wizard for remote
+# management via the tunnel (AccountOwner JWT auth). See
+# docs/11-roadmap.md §M9.6 + deputywizard/src/auth.rs.
+
+- name: Stat staged API pubkey (for wizard AccountOwner auth)
+  ansible.builtin.stat:
+    path: "{{ deputyos_api_pubkey_path }}"
+  register: deputyos_api_pubkey_stat
+  delegate_to: localhost
+  become: false
+
+- name: "Wizard: bake API pubkey for AccountOwner auth (M9.6)"
+  ansible.builtin.copy:
+    src: "{{ deputyos_api_pubkey_path }}"
+    dest: "{{ deputyos_api_pubkey_dest }}"
+    owner: root
+    group: root
+    # 0644 — this is a *public* key, non-secret. The wizard validates JWT
+    # signatures against it; it never decrypts with it.
+    mode: "0644"
+  when: deputyos_api_pubkey_stat.stat.exists
+
+- name: "Wizard: warn when API pubkey not staged (remote mgmt falls back to Token)"
+  ansible.builtin.debug:
+    msg: >-
+      API pubkey not staged at {{ deputyos_api_pubkey_path }} —
+      /etc/deputyos/api-pubkey.pem not baked. The remote-wizard unit will fall
+      back to Token mode (remote management via the tunnel is unavailable
+      until the build pipeline stages the API signing pubkey). See
+      docs/11-roadmap.md §M9.6.
+  when: not deputyos_api_pubkey_stat.stat.exists
+
+- name: "Wizard: drop remote-wizard systemd unit (M9.6, post-first-boot)"
+  ansible.builtin.template:
+    src: deputyos-remote-wizard.service.j2
+    dest: /etc/systemd/system/deputyos-remote-wizard.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_remote_wizard_unit
+
+- name: "Wizard: enable remote-wizard (gated on wizard-state.json by the unit)"
+  # Enabled so it auto-starts on boot once /var/lib/deputyos/wizard-state.json
+  # exists (first boot completed). The unit's ConditionPathExists is the
+  # inverse of deputywizard.service, so the two never bind :8088 at once.
+  ansible.builtin.systemd:
+    name: deputyos-remote-wizard.service
+    enabled: true
+    daemon_reload: "{{ _deputyos_remote_wizard_unit is changed }}"
+  failed_when: false

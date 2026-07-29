@@ -1,0 +1,10 @@
+# Example variable file. Copy to a real .pkrvars.hcl (gitignored) and pass
+# with `packer build -var-file=...`. CI never uses this; CI passes vars
+# inline via the Makefile.
+
+profile = "openclaw"
+channel = "dev"
+tier    = "standard"
+
+# Pin the base image checksum here for reproducible local builds.
+# base_image_checksum = "sha256:<...>"

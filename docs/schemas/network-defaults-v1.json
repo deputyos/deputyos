@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://www.deputyos.com/schemas/network-defaults-v1.json",
+  "title": "deputyOS network-defaults (per-profile egress seed)",
+  "description": "Schema for /etc/deputyos/network-defaults.json — a per-profile curated allow-list of hostnames baked at image time from roles/deputyos/files/network-defaults.<profile>.json. Read-only seed: `deputyctl network mode whitelist` copies `allow_hosts` into /etc/deputyos/network-policy.json only when the live policy's allow_hosts is empty (idempotent — a user-curated list is never clobbered). Schema version 1; bump on breaking changes.",
+  "type": "object",
+  "required": ["profile", "allow_hosts"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "default": "https://www.deputyos.com/schemas/network-defaults-v1.json",
+      "description": "JSON Schema URL."
+    },
+    "profile": {
+      "type": "string",
+      "description": "The profile id this defaults file was curated for (e.g. openclaw, hermes, khoj). Informational."
+    },
+    "mode": {
+      "enum": ["open", "whitelist", "airgap"],
+      "description": "Informational: the mode the profile recommends. Seeding only happens on a switch to `whitelist`; this field is not enforced."
+    },
+    "allow_hosts": {
+      "type": "array",
+      "default": [],
+      "description": "Hostnames permitted in `whitelist` mode — LLM providers, chat gateways, package indices the profile genuinely needs. Free-form hostnames (resolved to IPv4 at apply time; see the egress threat model for the DNS-only limitation).",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,80 @@
+---
+# Oracle Cloud — Always-Free Ampere A1 (aarch64) variant.
+#
+# Build path: Packer QEMU aarch64 → qcow2 → user uploads via OCI CLI to
+# Object Storage → `oci compute image import` produces a bootable custom
+# image. The qcow2 we emit here is identical in shape to qemu-aarch64's
+# output; only the role's variant tuning differs.
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — oracle-arm-free row.
+#   docs/14-limitations.md    §"oracle-arm-free": Always-Free reclaim
+#                              risk after ~7 days idle (per Oracle's
+#                              published policy at time of writing). The
+#                              wizard will surface a keepalive opt-in
+#                              (M3+); this variant does NOT enable it
+#                              automatically.
+#
+# Sizing:
+#   The Always-Free A1 quota is 4 OCPU + 24 GB RAM divided across up to
+#   four instances. The default single-instance shape we target is
+#   1 OCPU / 6 GB — that's what `oci compute instance launch` defaults
+#   to and what the wizard recommends. Users running 4 OCPU/24 GB in one
+#   instance can override at runtime; the limits file reflects the
+#   conservative single-instance default.
+
+- name: Set oracle-arm-free facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    # Default single-instance shape is 1 OCPU / 6 GB. The full Always-Free
+    # quota is 24 GB across instances, but baking a 24 GB RAM assumption
+    # into limits.json would mis-size the wizard's headroom checks for
+    # users on the default single-instance setup.
+    deputyos_target_ram_mb: 6144
+    deputyos_target_storage_class: "block"
+    deputyos_cloud: "oracle"
+
+- name: Ensure cloud-init is present
+  # Oracle's custom-image import path expects cloud-init; the Debian arm64
+  # cloud image we build from already ships it.
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present
+
+- name: Install Oracle Cloud Agent (OCA) — best-effort
+  # Oracle ship `oracle-cloud-agent` via their own apt repo, which we
+  # don't pre-add. Try the package; if it's not in the configured repos,
+  # log and continue. Users who want the full OCA telemetry add the repo
+  # post-deploy or use a managed Oracle Linux image instead.
+  ansible.builtin.apt:
+    name: oracle-cloud-agent
+    state: present
+  failed_when: false
+  register: deputyos_oca_install
+
+- name: Note Oracle Cloud Agent install result
+  ansible.builtin.debug:
+    msg: >-
+      oracle-cloud-agent install:
+      {{ 'ok' if deputyos_oca_install.failed | default(false) == false
+         else 'skipped (Oracle apt repo not configured; OCA optional)' }}
+
+- name: Enable serial getty on ttyAMA0
+  # Oracle's web console hooks the serial port; matches qemu-aarch64.
+  ansible.builtin.systemd:
+    name: serial-getty@ttyAMA0.service
+    enabled: true
+    daemon_reload: true
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"

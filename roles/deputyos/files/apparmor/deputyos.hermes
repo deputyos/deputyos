@@ -1,0 +1,136 @@
+#include <tunables/global>
+
+# AppArmor profile for Hermes Agent, baked by the deputyos role at image-build time.
+# Path: /etc/apparmor.d/deputyos.hermes
+# Reload after edit: apparmor_parser -r /etc/apparmor.d/deputyos.hermes
+#
+# Confinement intent (docs/09-security.md §AppArmor):
+#   * read+exec on the install root and the venv
+#   * read+write on the agent's data dir only
+#   * read on /etc/deputyos/{secrets.env,profiles/hermes.toml,limits.json}
+#   * inbound + outbound network for channels + model API egress
+#   * NO mount, NO ptrace of others, NO sys_module/sys_rawio/dac_override
+#
+# Hermes-specific relaxations vs. deputyos.openclaw:
+#   * sys_ptrace + sys_admin are NOT denied. Hermes' skill executor spawns
+#     sandboxed child processes via unshare(CLONE_NEWUSER), which needs
+#     sys_admin to call unshare and sys_ptrace to seccomp-instrument the
+#     child. The systemd unit's NoNewPrivileges + RestrictNamespaces still
+#     constrains what the child can do once it's in the new namespace.
+#   * /home/agent/.hermes/skills/** is allowed `ix` so author-time skills
+#     can be exec'd. /tmp and /var/tmp remain `deny wx` so a compromised
+#     skill can't write+exec from a world-writable path.
+#
+# The profile binds to the binary path that systemd ExecStarts. Both the
+# real `hermes` (pip-installed entrypoint) and the bake-time stub script
+# live there, so this profile applies to whichever ends up at that path.
+
+profile deputyos.hermes /opt/deputyos/profiles/hermes/.venv/bin/hermes flags=(enforce) {
+  #include <abstractions/base>
+  #include <abstractions/python>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Python interpreter — the venv shim is a #!/usr/bin/env python3 script.
+  /usr/bin/python3.11                                 ix,
+  /usr/bin/python3                                    ix,
+  /usr/local/bin/python3*                             ix,
+  /opt/deputyos/profiles/hermes/.venv/bin/python3*     ix,
+  /opt/deputyos/profiles/hermes/.venv/bin/hermes       ix,
+  /usr/bin/env                                        ix,
+
+  # Install tree (read+exec). Native modules ship as .so.
+  /opt/deputyos/profiles/hermes/**                     r,
+  /opt/deputyos/profiles/hermes/**.so*                 mr,
+  /opt/deputyos/profiles/hermes/.venv/lib/**.so*       mr,
+  /opt/deputyos/profiles/hermes/.venv/lib/**/*.so*     mr,
+  /opt/deputyos/profiles/hermes/.venv/bin/*            ix,
+
+  # stub fallback — remove when real hermes bake is reliable.
+  /usr/bin/bash                                       ix,
+  /usr/bin/dash                                       ix,
+  /usr/bin/nc.openbsd                                 ix,
+  /usr/bin/sleep                                      ix,
+
+  # Data dir (read+write, owner-only).
+  owner /home/agent/.hermes/                          rw,
+  owner /home/agent/.hermes/**                        rwk,
+  # SQLite WAL/SHM files (FTS5 memory store).
+  owner /home/agent/.hermes/memory/                   rw,
+  owner /home/agent/.hermes/memory/**                 rwk,
+  # Skill files (Hermes authors these at runtime).
+  owner /home/agent/.hermes/skills/                   rw,
+  owner /home/agent/.hermes/skills/**                 rwk,
+  # Allow exec inside the skills tree (the self-improvement loop runs them).
+  /home/agent/.hermes/skills/**                       ix,
+
+  # deputyOS shared config.
+  /etc/deputyos/                                       r,
+  /etc/deputyos/secrets.env                            r,
+  /etc/deputyos/profiles/                              r,
+  /etc/deputyos/profiles/hermes.toml                   r,
+  /etc/deputyos/profiles/hermes/                       r,
+  /etc/deputyos/profiles/hermes/**                     r,
+  /etc/deputyos/hermes/                                r,
+  /etc/deputyos/hermes/**                              r,
+  /etc/deputyos/limits.json                            r,
+
+  # Common readables (Python startup probes).
+  /etc/ld.so.cache                                    r,
+  /etc/ld.so.preload                                  r,
+  /etc/ssl/openssl.cnf                                r,
+  /etc/resolv.conf                                    r,
+  /etc/nsswitch.conf                                  r,
+  /etc/host.conf                                      r,
+  /etc/hosts                                          r,
+  /etc/localtime                                      r,
+  /sys/devices/system/cpu/online                      r,
+  /proc/sys/kernel/random/uuid                        r,
+  /proc/sys/net/core/somaxconn                        r,
+  /proc/sys/kernel/unprivileged_userns_clone          r,
+  /proc/cpuinfo                                       r,
+  /proc/meminfo                                       r,
+  /proc/stat                                          r,
+  /proc/loadavg                                       r,
+  /proc/uptime                                        r,
+  /proc/*/status                                      r,
+  /proc/*/cmdline                                     r,
+  /proc/*/stat                                        r,
+
+  # Network — agent listens on channel ports and reaches out to providers
+  # (LLM APIs, channel webhooks, MCP servers).
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network unix stream,
+  network unix dgram,
+  network netlink raw,
+
+  # Capabilities — Hermes needs sys_admin (for unshare(CLONE_NEWUSER)) and
+  # sys_ptrace (to seccomp-instrument sandboxed skill children). The kernel
+  # gates unshare() further via kernel.unprivileged_userns_clone. Other
+  # privilege-bearing caps stay denied.
+  capability sys_admin,
+  capability sys_ptrace,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny capability dac_override,
+  deny capability dac_read_search,
+  deny capability mac_admin,
+  deny capability mac_override,
+
+  # Deny risky paths.
+  deny /tmp/**           wx,
+  deny /var/tmp/**       wx,
+  deny /root/**          rwlk,
+  deny /home/[^a]*/**    rwlk,
+  deny /etc/shadow       rwlk,
+  deny /etc/sudoers      rwlk,
+  deny /etc/sudoers.d/** rwlk,
+
+  # Signals + ptrace (self only — child sandboxes share the profile).
+  signal (send,receive) peer=deputyos.hermes,
+  ptrace (read,trace)   peer=deputyos.hermes,
+  /mnt/deputyos/** rwk,
+}

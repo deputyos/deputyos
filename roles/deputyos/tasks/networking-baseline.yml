@@ -1,0 +1,229 @@
+---
+# Networking baseline — Phase 5 Lane B.
+#
+# Three concerns:
+#   1. mDNS publishing via avahi (so deputyos.local resolves on the LAN
+#      and the wizard appears in Bonjour browsers).
+#   2. Cloudflare Tunnel binary (cloudflared) — installed but NOT
+#      started; the wizard's apply step writes config + starts on demand.
+#   3. Tailscale binary — installed but NOT started; same pattern.
+#
+# Reference: docs/07-networking.md.
+#
+# Variant gates: cloud targets (digitalocean, oracle-arm-free,
+# hetzner-cloud, vultr, linode, fly-machines) and wsl2 don't benefit
+# from mDNS (no link-local LAN) or qr-on-tty (no console). Cloudflared
+# and tailscale don't make sense on fly-machines (container) but are
+# fine on the rest. deputyos_cloud is set later by variant-*.yml so we
+# gate on deputyos_hw directly via deputyos_cloudish_hw (defaults).
+
+# ---------- 1. mDNS via avahi ----------
+
+- name: Install avahi packages
+  ansible.builtin.apt:
+    name:
+      - avahi-daemon
+      - avahi-utils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+- name: Configure avahi-daemon (host-name, no reflector)
+  ansible.builtin.copy:
+    dest: /etc/avahi/avahi-daemon.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. See docs/07-networking.md §mDNS.
+      [server]
+      host-name={{ deputyos_mdns_hostname }}
+      domain-name=local
+      use-ipv4=yes
+      use-ipv6=yes
+      ratelimit-interval-usec=1000000
+      ratelimit-burst=1000
+
+      [wide-area]
+      enable-wide-area=no
+
+      [publish]
+      publish-addresses=yes
+      publish-hinfo=no
+      publish-workstation=yes
+      publish-domain=yes
+
+      [reflector]
+      enable-reflector=no
+
+      [rlimits]
+      rlimit-core=0
+      rlimit-data=8388608
+      rlimit-fsize=0
+      rlimit-nofile=768
+      rlimit-stack=8388608
+      rlimit-nproc=3
+  notify: Reload Avahi
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+- name: Drop deputyos avahi service file
+  ansible.builtin.template:
+    src: avahi-deputyos.service.j2
+    dest: /etc/avahi/services/deputyos.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload Avahi
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+- name: Enable avahi-daemon at boot
+  ansible.builtin.service:
+    name: avahi-daemon
+    enabled: true
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+- name: Allow mDNS multicast through ufw (5353/udp)
+  community.general.ufw:
+    rule: allow
+    port: "5353"
+    proto: udp
+  when: deputyos_hw not in deputyos_cloudish_hw
+
+# ---------- 2. Cloudflared ----------
+#
+# Pinned via the cloudflare apt repo. Repo signing key fingerprint is
+# embedded in the keyring task so the trust chain is auditable. We do
+# not start any cloudflared service at bake — Lane W's wizard "tunnel"
+# step writes ~/.cloudflared/config.yml + runs `cloudflared service
+# install` on demand.
+
+- name: Ensure /etc/apt/keyrings exists (cloudflared)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - deputyos_cloudflared_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Install cloudflared GPG signing key
+  ansible.builtin.get_url:
+    # Cloudflare Pkg Server signing key — fingerprint
+    # 67ED 1B47 9132 24A0 8D2A  C13B 7F47 88D8 5095 12FE
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /etc/apt/keyrings/cloudflare-main.gpg
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  when:
+    - deputyos_cloudflared_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Add cloudflared apt repository
+  vars:
+    cf_key: "/etc/apt/keyrings/cloudflare-main.gpg"
+    cf_url: "https://pkg.cloudflare.com/cloudflared"
+    cf_rel: "{{ ansible_distribution_release | default('bookworm') }}"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/cloudflared.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. cloudflared package source.
+      # See https://pkg.cloudflare.com/index.html.
+      deb [signed-by={{ cf_key }}] {{ cf_url }} {{ cf_rel }} main
+  when:
+    - deputyos_cloudflared_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+  when:
+    - deputyos_cloudflared_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Ensure cloudflared service is NOT enabled (wizard owns activation)
+  ansible.builtin.service:
+    name: cloudflared
+    enabled: false
+  failed_when: false
+  when:
+    - deputyos_cloudflared_install | bool
+    - deputyos_hw != "fly-machines"
+
+# ---------- 3. Tailscale ----------
+#
+# Same pattern: add repo, install, do not start. The wizard's apply step
+# runs `tailscale up --auth-key=<key>` when the user opts in.
+
+- name: Ensure /etc/apt/keyrings exists (tailscale)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - deputyos_tailscale_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Install Tailscale GPG signing key
+  ansible.builtin.get_url:
+    # Tailscale package signing key — fingerprint
+    # 2596 A99E AAB3 3821 893C  0A5C 458C A832 EB6D 537C
+    url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_distribution_release | default('bookworm') }}.noarmor.gpg"
+    dest: /etc/apt/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  when:
+    - deputyos_tailscale_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Add tailscale apt repository
+  vars:
+    ts_key: "/etc/apt/keyrings/tailscale-archive-keyring.gpg"
+    ts_url: "https://pkgs.tailscale.com/stable/debian"
+    ts_rel: "{{ ansible_distribution_release | default('bookworm') }}"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Tailscale stable channel.
+      deb [signed-by={{ ts_key }}] {{ ts_url }} {{ ts_rel }} main
+  when:
+    - deputyos_tailscale_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Install tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+  when:
+    - deputyos_tailscale_install | bool
+    - deputyos_hw != "fly-machines"
+
+- name: Ensure tailscaled is enabled but not started at bake
+  # Service is installed disabled-by-default by the package; the wizard's
+  # apply step runs `systemctl enable --now tailscaled && tailscale up
+  # --auth-key=<key>` when the user opts in. We leave it enabled here so
+  # that on first boot the daemon is ready to accept `tailscale up`.
+  ansible.builtin.service:
+    name: tailscaled
+    enabled: true
+  failed_when: false
+  when:
+    - deputyos_tailscale_install | bool
+    - deputyos_hw != "fly-machines"

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Managed by deputyos. Example hook for /etc/deputyos/hooks.d/cost-alert/.
+#
+# Convention (mirrors deputyctl-hook-example.sh):
+#   * Files in /etc/deputyos/hooks.d/<event>/ run in lexical order whenever
+#     <event> fires. The dispatcher kills any script that exceeds 5 seconds.
+#   * Each hook reads a single JSON event payload from stdin.
+#   * Exit 0 means success; non-zero is logged but not propagated.
+#   * Files shipped by the role end in `.disabled` and are not executable;
+#     rename to remove the suffix and `chmod +x` to opt in.
+#
+# Payload schema for `cost-alert` (see
+# /etc/deputyos/hook-payload-schemas.json#/definitions/cost-alert):
+#
+#   {
+#     "timestamp":     "2026-04-26T14:00:00Z",   # ISO-8601 UTC
+#     "threshold_usd": 5.00,                     # configured cap
+#     "spent_usd":     5.32,                     # observed spend
+#     "window":        "daily",                  # hourly|daily|monthly
+#     "provider":      "openrouter",             # optional
+#     "level":         "exceeded"                # warning|exceeded
+#   }
+#
+# This example logs a one-liner via systemd-cat and (if an admin webhook is
+# configured) posts a notification. Replace with whatever fits your ops
+# pipeline (Slack, PagerDuty, e-mail via msmtp, …). Keep work synchronous
+# and bounded — the dispatcher's 5s timeout applies.
+#
+# Wiring: drop a renamed copy at
+#   /etc/deputyos/hooks.d/cost-alert/00-example.sh
+# and `chmod +x` it.
+
+set -euo pipefail
+
+payload="$(cat)"
+
+# Minimal jq-free parsing. The schema guarantees these keys exist when the
+# alert was emitted by `cost::evaluate`; tolerate missing fields gracefully.
+spent="$(printf '%s' "$payload" | sed -n 's/.*"spent_usd"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p')"
+threshold="$(printf '%s' "$payload" | sed -n 's/.*"threshold_usd"[[:space:]]*:[[:space:]]*\([0-9.]*\).*/\1/p')"
+window="$(printf '%s' "$payload" | sed -n 's/.*"window"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+level="$(printf '%s' "$payload" | sed -n 's/.*"level"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+msg="deputyos cost-alert: ${level:-?} spent=\$${spent:-?} threshold=\$${threshold:-?} window=${window:-?}"
+
+# Local breadcrumb — always works.
+logger -t deputyos-hook "$msg"
+
+# Optional webhook fan-out. Only fires if the admin set the env var via
+# the hook unit's drop-in override (e.g.,
+# /etc/systemd/system/deputyos-hook@.service.d/webhook.conf).
+if [[ -n "${DEPUTYOS_COST_WEBHOOK_URL:-}" ]]; then
+  # 4-second curl budget so we stay under the 5s dispatcher timeout.
+  curl --silent --show-error --max-time 4 \
+    -H "Content-Type: application/json" \
+    --data "$payload" \
+    "$DEPUTYOS_COST_WEBHOOK_URL" \
+    || logger -t deputyos-hook "warn: webhook post failed for cost-alert"
+fi
+
+exit 0

@@ -1,0 +1,49 @@
+---
+# macOS-QEMU variant — same image as qemu-aarch64, with macOS-launcher
+# tweaks. The artefact (qcow2) IS the qemu-aarch64 image; this variant
+# just pre-sets RAM/cloud facts and writes a marker file so
+# `deputyctl limits` knows it's running under macos-utm or
+# macos-orbstack.
+#
+# Reference: docs/03-image-builds.md (macos-qemu row) and
+# docs/14-limitations.md §"macos-qemu".
+#
+# This variant deliberately delegates 95% of its work to
+# variant-qemu-aarch64.yml — keeping the underlying image bit-for-bit
+# identical to qemu-aarch64 means we don't multiply the smoke matrix.
+# The macOS-specific facts are applied AFTER delegation so they win
+# over the qemu-aarch64 defaults (set_fact = last-write-wins).
+
+- name: Delegate to qemu-aarch64 variant for the actual bake
+  # The qcow2 the macOS launcher boots IS the qemu-aarch64 image. Run
+  # the same tasks (qemu-guest-agent, serial-getty on ttyAMA0,
+  # cloud-init, deputyctl assert) so we don't drift from CI.
+  ansible.builtin.import_tasks: variant-qemu-aarch64.yml
+
+- name: Override qemu-aarch64 facts with macos-qemu defaults
+  # 2 GB is the launcher default — UTM/OrbStack on a Mac with 16 GB
+  # host RAM can reasonably allocate 2 GB to the guest. Users with
+  # more headroom override at launch time, not at bake. Storage class
+  # changes to "qcow2" so `deputyctl limits` reports honestly.
+  ansible.builtin.set_fact:
+    deputyos_target_ram_mb: 2048
+    deputyos_target_storage_class: "qcow2"
+    deputyos_cloud: "macos"
+    # clamd is technically possible on macOS-hosted qemu (the qcow2
+    # has the same RAM tier as qemu-aarch64), but the launcher default
+    # is 2 GB which is below the clamd RSS threshold. Keep it off so
+    # the user gets a working image at the default allocation.
+    deputyos_clamav_daemon_enabled: false
+
+- name: Mark image as macos-qemu-hosted
+  # Lets the wizard tell the user "you're on a demo qcow2; voice and
+  # local-LLM are off, throughput is throttled by emulation." Marker
+  # written after delegation so it can't be clobbered by the
+  # qemu-aarch64 variant.
+  ansible.builtin.copy:
+    dest: /etc/deputyos/host
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      macos-utm

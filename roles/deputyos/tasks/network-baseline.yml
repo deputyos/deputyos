@@ -1,0 +1,62 @@
+---
+# Network egress baseline (M5.5).
+#
+# Always-on (not gated on deputyos_airgap). Drops the network-policy.json
+# substrate on every image and installs + enables an `deputyos-network-apply`
+# oneshot that re-renders /etc/nftables.conf from the policy on every boot.
+#
+# This is the `mounts-baseline.yml`-equivalent for egress: the on-disk
+# network-policy.json is the single source of truth, and the oneshot
+# re-applies it so a runtime-injected nftables rule (e.g. a compromised
+# process smuggling in an allow) does not survive a reboot. `whitelist`
+# and `open` modes self-heal at boot; airgap images additionally get the
+# static deny ruleset from airgap-baseline.yml (consistent — the policy
+# regenerates an equivalent deny).
+#
+# Per-profile curated allow-hosts are copied by network-defaults.yml.
+
+- name: Network | drop default network-policy.json (open, empty allow-list)
+  ansible.builtin.copy:
+    dest: "{{ deputyos_etc_dir }}/network-policy.json"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false  # never clobber a user-edited policy on update
+    content: |
+      {
+        "$schema": "https://www.deputyos.com/schemas/network-policy-v1.json",
+        "mode": "open",
+        "allow_hosts": [],
+        "set_at_build_time": false
+      }
+
+- name: "Network: install deputyos-network-apply wrapper script"
+  ansible.builtin.copy:
+    src: ../../../scripts/runtime/deputyos-network-apply.sh
+    dest: /usr/local/lib/deputyos/deputyos-network-apply.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Network: install deputyos-network-apply systemd unit"
+  ansible.builtin.template:
+    src: deputyos-network-apply.service.j2
+    dest: /etc/systemd/system/deputyos-network-apply.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_network_apply_unit
+
+- name: "Network: enable deputyos-network-apply.service"
+  # Re-render nftables from the policy at boot, ahead of the first-boot wizard.
+  # Without this the baked ruleset (airgap) or the last `deputyctl network
+  # apply` stood until the next manual apply.
+  ansible.builtin.systemd:
+    name: deputyos-network-apply.service
+    enabled: true
+    daemon_reload: true
+    state: "{{ 'restarted' if _deputyos_network_apply_unit is changed else 'started' }}"
+  # The oneshet shells to `nft`; skip cleanly where nftables is absent (lean
+  # non-airgap tiers may not install it). `deputyctl network apply` itself
+  # fails closed on a missing nft — don't fail the whole bake for it.
+  failed_when: false

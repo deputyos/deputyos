@@ -1,0 +1,29 @@
+# /boot/firmware/deputyos.yaml — first-boot bootstrap config.
+#
+# Drop this file (renamed to deputyos.yaml, no .example suffix) onto the
+# FAT boot partition of a freshly flashed deputyOS card. cloud-init reads
+# it on first boot and applies the values below before the wizard runs.
+# The file is consumed once and then quarantined to /etc/deputyos/ so it
+# isn't re-applied on subsequent reboots.
+#
+# Every field is optional. If you omit a field, the wizard prompts for
+# it interactively at first boot.
+
+# Hostname the device announces over mDNS (and uses for the wizard URL).
+hostname: deputyos
+
+# WiFi credentials. Skip this section to use Ethernet only.
+wifi:
+  ssid: "your-network-name"
+  # WPA2/WPA3 pre-shared key. Stored mode 0600, root-only.
+  psk: "your-network-password"
+
+# SSH access. Public-key auth only — password auth is disabled in the
+# image baseline. Paste one or more keys into authorized_keys.
+ssh:
+  authorized_keys:
+    - "ssh-ed25519 AAAA... you@laptop"
+    # - "ssh-ed25519 AAAA... another-key"
+
+# IANA tz database name. Defaults to UTC if unset.
+timezone: "Etc/UTC"

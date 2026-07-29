@@ -1,0 +1,50 @@
+[package]
+name = "deputywizard"
+version = "0.1.0"
+description = "First-boot web wizard for deputyOS appliance images."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "deputywizard"
+path = "src/main.rs"
+
+[dependencies]
+deputyctl = { path = "../deputyctl" }
+deputyd = { package = "deputyd-protocol", path = "../deputyd-protocol" }
+anyhow = "1.0"
+axum = { version = "0.7", features = ["macros"] }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_urlencoded = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tower-http = { version = "0.5", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Used for time-stamping wizard state. No human-formatted output, so no chrono.
+time = { version = "0.3", features = ["formatting", "macros"] }
+# Cryptographic random for token generation. Tiny.
+rand = "0.8"
+# Provider-key round-trip validation. Same minimal-feature pattern deputyctl uses.
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+# QR code rendering for the first-boot launch URL. `qrcodegen` is no_std,
+# pure-Rust, and tiny — no image/PNG deps; we render to ASCII ourselves.
+qrcodegen = "1.8"
+# AccountOwner auth mode (remote management via tunnel): validate the account
+# JWT against the API's RSA256 public key embedded in the image. Same
+# jsonwebtoken version the sibling API uses; base64 for JWT payload decoding.
+jsonwebtoken = "9"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+# Generating an RSA keypair for AccountOwner auth tests.
+rsa = "0.9"
+rand = "0.8"
+
+[lints]
+workspace = true

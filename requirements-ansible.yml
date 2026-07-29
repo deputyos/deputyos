@@ -1,0 +1,5 @@
+---
+collections:
+  - name: community.general
+    # Paired with the isolated ansible-core pin in requirements-ansible.txt.
+    version: "9.5.13"

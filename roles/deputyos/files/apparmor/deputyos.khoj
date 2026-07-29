@@ -1,0 +1,132 @@
+#include <tunables/global>
+
+# AppArmor profile for Khoj, baked by the deputyos role at image-build time.
+# Path: /etc/apparmor.d/deputyos.khoj
+# Reload after edit: apparmor_parser -r /etc/apparmor.d/deputyos.khoj
+#
+# Confinement intent (docs/09-security.md §AppArmor):
+#   * read+exec on the install root and the venv
+#   * read+write on the agent's data dir only
+#   * read on /etc/deputyos/{secrets.env,profiles/khoj.toml,limits.json}
+#   * inbound + outbound network for channels + model API egress
+#   * NO mount, NO ptrace of others, NO sys_admin/sys_module/dac_override
+#
+# Khoj differs from Hermes in two ways:
+#   * No skill-child unshare sandbox -> sys_admin and sys_ptrace stay denied,
+#     RestrictNamespaces=true in the unit.
+#   * Tighter skills tree -> the `skills/` dir holds JSON persona/tool configs,
+#     not executable code. We do NOT grant `ix` on it; if a future Khoj release
+#     adds Python skill plugins we'll need to revisit.
+#
+# The profile binds to the binary path that systemd ExecStarts. Both the
+# real `khoj` (pip-installed entrypoint) and the bake-time stub script
+# live there, so this profile applies to whichever ends up at that path.
+
+profile deputyos.khoj /opt/deputyos/profiles/khoj/.venv/bin/khoj flags=(enforce) {
+  #include <abstractions/base>
+  #include <abstractions/python>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Python interpreter — the venv shim is a #!/usr/bin/env python3 script.
+  /usr/bin/python3.11                                 ix,
+  /usr/bin/python3                                    ix,
+  /usr/local/bin/python3*                             ix,
+  /opt/deputyos/profiles/khoj/.venv/bin/python3*       ix,
+  /opt/deputyos/profiles/khoj/.venv/bin/khoj           ix,
+  /usr/bin/env                                        ix,
+
+  # Install tree (read+exec). Native modules ship as .so.
+  /opt/deputyos/profiles/khoj/**                       r,
+  /opt/deputyos/profiles/khoj/**.so*                   mr,
+  /opt/deputyos/profiles/khoj/.venv/lib/**.so*         mr,
+  /opt/deputyos/profiles/khoj/.venv/lib/**/*.so*       mr,
+  /opt/deputyos/profiles/khoj/.venv/bin/*              ix,
+
+  # stub fallback — remove when real khoj bake is reliable.
+  /usr/bin/bash                                       ix,
+  /usr/bin/dash                                       ix,
+  /usr/bin/nc.openbsd                                 ix,
+  /usr/bin/sleep                                      ix,
+
+  # Data dir (read+write, owner-only).
+  owner /home/agent/.khoj/                            rw,
+  owner /home/agent/.khoj/**                          rwk,
+  # SQLite WAL/SHM files (chat session store + Django ORM).
+  owner /home/agent/.khoj/memory/                     rw,
+  owner /home/agent/.khoj/memory/**                   rwk,
+  # Skill / persona configs (JSON, not executable).
+  owner /home/agent/.khoj/skills/                     rw,
+  owner /home/agent/.khoj/skills/**                   rwk,
+  # Indexed content (PDFs, markdown, org-mode imported by the user).
+  owner /home/agent/.khoj/content/                    rw,
+  owner /home/agent/.khoj/content/**                  rwk,
+
+  # deputyOS shared config.
+  /etc/deputyos/                                       r,
+  /etc/deputyos/secrets.env                            r,
+  /etc/deputyos/profiles/                              r,
+  /etc/deputyos/profiles/khoj.toml                     r,
+  /etc/deputyos/profiles/khoj/                         r,
+  /etc/deputyos/profiles/khoj/**                       r,
+  /etc/deputyos/khoj/                                  r,
+  /etc/deputyos/khoj/**                                r,
+  /etc/deputyos/limits.json                            r,
+
+  # Common readables (Python startup probes).
+  /etc/ld.so.cache                                    r,
+  /etc/ld.so.preload                                  r,
+  /etc/ssl/openssl.cnf                                r,
+  /etc/resolv.conf                                    r,
+  /etc/nsswitch.conf                                  r,
+  /etc/host.conf                                      r,
+  /etc/hosts                                          r,
+  /etc/localtime                                      r,
+  /etc/mime.types                                     r,
+  /sys/devices/system/cpu/online                      r,
+  /proc/sys/kernel/random/uuid                        r,
+  /proc/sys/net/core/somaxconn                        r,
+  /proc/cpuinfo                                       r,
+  /proc/meminfo                                       r,
+  /proc/stat                                          r,
+  /proc/loadavg                                       r,
+  /proc/uptime                                        r,
+  /proc/*/status                                      r,
+  /proc/*/cmdline                                     r,
+  /proc/*/stat                                        r,
+
+  # Network — agent listens on :42110 (web/desktop/obsidian/emacs LAN clients)
+  # and reaches out to providers (LLM APIs, Telegram Bot API, Twilio, online
+  # search providers).
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network unix stream,
+  network unix dgram,
+  network netlink raw,
+
+  # Capabilities — Khoj runs as a single Python process; no namespace tricks.
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_ptrace,
+  deny capability sys_rawio,
+  deny capability dac_override,
+  deny capability dac_read_search,
+  deny capability mac_admin,
+  deny capability mac_override,
+
+  # Deny risky paths.
+  deny /tmp/**           wx,
+  deny /var/tmp/**       wx,
+  deny /root/**          rwlk,
+  deny /home/[^a]*/**    rwlk,
+  deny /etc/shadow       rwlk,
+  deny /etc/sudoers      rwlk,
+  deny /etc/sudoers.d/** rwlk,
+
+  # Signals + ptrace (self only).
+  signal (send,receive) peer=deputyos.khoj,
+  ptrace (read,trace)   peer=deputyos.khoj,
+  /mnt/deputyos/** rwk,
+}

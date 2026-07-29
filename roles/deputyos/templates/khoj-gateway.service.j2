@@ -1,0 +1,61 @@
+{# Rendered from profiles/khoj.toml at bake time by the deputyos role.
+   Variables (set in tasks/profile-khoj.yml or via Packer extra_vars):
+     khoj_install_root  e.g. /opt/deputyos/profiles/khoj
+     khoj_data_dir      e.g. /home/agent/.khoj
+     khoj_entrypoint    e.g. {{ khoj_install_root }}/.venv/bin/khoj --no-gui --host 127.0.0.1 --port 42110
+     khoj_unit_name     e.g. khoj-gateway.service
+   Hardening below mirrors the deputyOS systemd baseline; touch with care.
+   Khoj keeps the *strict* RestrictNamespaces (no skill-child sandbox like Hermes).
+   AppArmor confinement is enforced separately via /etc/apparmor.d/deputyos.khoj
+   which binds to {{ khoj_install_root }}/.venv/bin/khoj. #}
+[Unit]
+Description=Khoj gateway (deputyOS)
+Documentation=https://github.com/khoj-ai/khoj
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=deputyos-workloads.slice
+User=agent
+Group=agent
+WorkingDirectory={{ khoj_data_dir }}
+EnvironmentFile=-/etc/deputyos/secrets.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=KHOJ_DB_TYPE=sqlite
+Environment=KHOJ_DATA_DIR={{ khoj_data_dir }}
+Environment=KHOJ_HOST=127.0.0.1
+ExecStart={{ khoj_entrypoint }}
+Restart=always
+RestartSec=5
+
+# Hardening — see docs/09-security.md.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ khoj_data_dir }} /etc/deputyos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+# Khoj has no skill-child sandbox (unlike Hermes); keep strict namespace blocks.
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Khoj is interpreted Python (no JIT), so MDWX stays on.
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+
+# AppArmor profile is loaded by the apparmor.service unit; attachment is by
+# the binary path declared in /etc/apparmor.d/deputyos.khoj.
+
+[Install]
+WantedBy=multi-user.target

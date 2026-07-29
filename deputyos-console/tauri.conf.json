@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "deputyOS Console",
+  "version": "0.1.0",
+  "identifier": "com.deputyos.console",
+  "build": {
+    "frontendDist": "src/ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "Manage local and remote deputyOS agents.",
+    "longDescription": "deputyOS Console — install, start, and manage local VM-based AI agents (openclaw, hermes) and your remote device fleet from one desktop app.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ]
+  }
+}

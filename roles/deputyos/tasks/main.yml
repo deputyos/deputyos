@@ -1,0 +1,159 @@
+---
+# Entry point. Order matters:
+#   1. Security baseline (always-on; failing-closed defaults)
+#   2. Hardware variant (kernel package, bootloader, firmware, governor)
+#   3. Profile-specific bake (agent code, systemd unit, AppArmor profile)
+# Lane subagents (E for security, B for variants, F for profiles) flesh
+# these out in M1; the scaffold imports the right files but each is a
+# placeholder for now.
+
+- name: Assert required role variables are set
+  ansible.builtin.assert:
+    that:
+      - deputyos_hw | length > 0
+      - deputyos_profile | length > 0
+    fail_msg: >-
+      deputyos_hw and deputyos_profile must be set (Packer extra_vars or
+      ansible-playbook -e). See docs/03-image-builds.md.
+
+- name: Ensure /usr/local/lib/deputyos exists (runtime helper install dir)
+  ansible.builtin.file:
+    path: /usr/local/lib/deputyos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply security baseline
+  ansible.builtin.import_tasks: security-baseline.yml
+
+- name: Assert image kind is explicit and supported
+  ansible.builtin.assert:
+    that:
+      - deputyos_image_kind in ["official", "agentless-dev"]
+    fail_msg: "deputyos_image_kind must be official or agentless-dev"
+
+- name: Record image kind
+  ansible.builtin.copy:
+    dest: /etc/deputyos/image-kind
+    content: "{{ deputyos_image_kind }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply networking baseline (mDNS, cloudflared, tailscale)
+  ansible.builtin.import_tasks: networking-baseline.yml
+
+- name: Install self-managed encrypted backup prerequisites
+  ansible.builtin.import_tasks: backup-baseline.yml
+
+- name: Apply wizard baseline (deputywizard binary + first-boot units)
+  ansible.builtin.import_tasks: wizard-baseline.yml
+
+- name: Apply hooks baseline (/etc/deputyos/hooks.d tree)
+  ansible.builtin.import_tasks: hooks-baseline.yml
+
+- name: Apply mounts baseline (drive-mounting policy + udev + helper)
+  ansible.builtin.import_tasks: mounts-baseline.yml
+
+- name: Apply per-profile network egress defaults (M5.5)
+  ansible.builtin.import_tasks: network-defaults.yml
+
+- name: Apply network egress baseline (policy substrate + boot re-apply oneshot)
+  # Always-on: drops /etc/deputyos/network-policy.json (open, empty allow-list)
+  # and installs + enables deputyos-network-apply.service, which re-renders
+  # nftables from the policy at boot. Runs before airgap-baseline so an
+  # AIRGAP=1 build overwrites the open default with mode=airgap.
+  ansible.builtin.import_tasks: network-baseline.yml
+
+- name: Apply airgap baseline (egress lockdown + apt mirror) when AIRGAP=1
+  # Self-gated on deputyos_airgap. When false the entire task list short-
+  # circuits, so non-airgap targets pay zero baking cost. See
+  # documentation/docs/concepts/airgap.md.
+  ansible.builtin.import_tasks: airgap-baseline.yml
+
+- name: Bake LFM2 GGUF model + llama.cpp service when AIRGAP=1
+  # Self-gated on deputyos_airgap. Tier-specific model selection lives in
+  # vars/llm-airgap.yml.
+  ansible.builtin.import_tasks: llm-airgap.yml
+
+- name: Apply voice baseline (whisper.cpp + Piper + voice-relay)
+  # Self-gated on deputyos_voice_enabled and deputyos_no_voice_hw — see
+  # voice-baseline.yml. M0-frozen profile manifests are NOT touched;
+  # voice config lives at /etc/deputyos/voice.toml.
+  ansible.builtin.import_tasks: voice-baseline.yml
+
+- name: Apply watchdog baseline (A/B boot-count + auto-rollback)
+  ansible.builtin.import_tasks: watchdog-baseline.yml
+
+- name: Install mandatory proprietary resident agent in official images
+  ansible.builtin.import_tasks: resident-overlay.yml
+  when: deputyos_image_kind == "official"
+
+- name: Apply rpi5 variant tuning
+  ansible.builtin.import_tasks: variant-rpi5.yml
+  when: deputyos_hw == "rpi5"
+
+- name: Apply rpi4 variant tuning
+  ansible.builtin.import_tasks: variant-rpi4.yml
+  when: deputyos_hw == "rpi4"
+
+- name: Apply arm64-generic variant tuning
+  ansible.builtin.import_tasks: variant-arm64-generic.yml
+  when: deputyos_hw == "arm64-generic"
+
+- name: Apply qemu-aarch64 variant tuning
+  ansible.builtin.import_tasks: variant-qemu-aarch64.yml
+  when: deputyos_hw == "qemu-aarch64"
+
+- name: Apply qemu-x86_64 variant tuning
+  ansible.builtin.import_tasks: variant-qemu-x86_64.yml
+  when: deputyos_hw == "qemu-x86_64"
+
+- name: Apply x86_64-mini-pc variant tuning
+  ansible.builtin.import_tasks: variant-x86_64-mini-pc.yml
+  when: deputyos_hw == "x86_64-mini-pc"
+
+- name: Apply wsl2 variant tuning
+  ansible.builtin.import_tasks: variant-wsl2.yml
+  when: deputyos_hw == "wsl2"
+
+- name: Apply macos-qemu variant tuning
+  ansible.builtin.import_tasks: variant-macos-qemu.yml
+  when: deputyos_hw == "macos-qemu"
+
+- name: Apply digitalocean variant tuning
+  ansible.builtin.import_tasks: variant-digitalocean.yml
+  when: deputyos_hw == "digitalocean"
+
+- name: Apply oracle-arm-free variant tuning
+  ansible.builtin.import_tasks: variant-oracle-arm-free.yml
+  when: deputyos_hw == "oracle-arm-free"
+
+- name: Apply hetzner-cloud variant tuning
+  ansible.builtin.import_tasks: variant-hetzner-cloud.yml
+  when: deputyos_hw == "hetzner-cloud"
+
+- name: Apply vultr variant tuning
+  ansible.builtin.import_tasks: variant-vultr.yml
+  when: deputyos_hw == "vultr"
+
+- name: Apply linode variant tuning
+  ansible.builtin.import_tasks: variant-linode.yml
+  when: deputyos_hw == "linode"
+
+- name: Apply fly-machines variant tuning
+  ansible.builtin.import_tasks: variant-fly-machines.yml
+  when: deputyos_hw == "fly-machines"
+
+- name: Apply OpenClaw profile bake
+  ansible.builtin.import_tasks: profile-openclaw.yml
+  when: deputyos_profile == "openclaw"
+
+- name: Apply Hermes profile bake
+  ansible.builtin.import_tasks: profile-hermes.yml
+  when: deputyos_profile == "hermes"
+
+- name: Apply Khoj profile bake
+  ansible.builtin.import_tasks: profile-khoj.yml
+  when: deputyos_profile == "khoj"

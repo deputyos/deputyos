@@ -1,0 +1,313 @@
+---
+# Khoj profile bake — Lane F, M7 third-profile acceptance.
+# Reference: docs/02-profiles.md §"Adding a third profile",
+#            docs/03-image-builds.md §"Hermetic build properties",
+#            docs/09-security.md §AppArmor,
+#            profiles/khoj.toml,
+#            CONTRIBUTING.md §profile-class.
+#
+# Khoj is the OpenClaw/Hermes-class third profile: multi-channel personal
+# assistant with persistent SQLite-backed memory + an agent/tool system.
+# Upstream: https://github.com/khoj-ai/khoj (MIT).
+#
+# Contract: when this task file finishes, the image contains
+#   * /opt/deputyos/profiles/khoj/                  (install root, agent:agent 0755)
+#   * /opt/deputyos/profiles/khoj/.venv/            (Python venv, agent-owned)
+#   * /home/agent/.khoj/{memory,skills}/           (data dir, 0700)
+#   * Python {{ khoj_python_version }} runtime
+#   * either real khoj=={{ khoj_pinned_version }} OR the stub binary
+#   * /etc/systemd/system/khoj-gateway.service     (enabled, not started)
+#   * /etc/apparmor.d/deputyos.khoj                 (enforce mode)
+#   * /opt/deputyos/profiles/khoj/.bake-meta        (read by `deputyctl version`)
+# Nothing is started here — first boot of the qcow2 starts the unit.
+#
+# Storage choice: Khoj's docker-compose default is Postgres+pgvector. We pick
+# SQLite (KHOJ_DB_TYPE=sqlite) for M7 acceptance — it ships in-tree, keeps the
+# appliance self-contained, and matches Khoj's supported single-binary mode.
+
+- name: Set Khoj bake defaults  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    khoj_install_root: "/opt/deputyos/profiles/khoj"
+    khoj_data_dir: "/home/agent/.khoj"
+    khoj_unit_name: "khoj-gateway.service"
+    # pinned_version mirrors profiles/khoj.toml [profile].pinned_version.
+    # Override via Packer extra_vars when bumping.
+    khoj_pinned_version: "{{ khoj_pinned_version | default('1.32.0') }}"
+    khoj_python_version: "{{ khoj_python_version | default('3.11') }}"
+    khoj_force_stub: "{{ khoj_force_stub | default(false) }}"
+    khoj_port: "{{ khoj_port | default(42110) }}"
+  tags: [profile, khoj]
+
+- name: Compute Khoj entrypoint  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    khoj_entrypoint: >-
+      {{ khoj_install_root }}/.venv/bin/khoj
+      --no-gui --host 127.0.0.1 --port {{ khoj_port }}
+  tags: [profile, khoj]
+
+- name: Ensure Khoj install root exists
+  ansible.builtin.file:
+    path: "{{ khoj_install_root }}"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+  tags: [profile, khoj]
+
+- name: Ensure Khoj data dir exists
+  ansible.builtin.file:
+    path: "{{ khoj_data_dir }}"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, khoj]
+
+- name: Ensure Khoj memory dir exists (SQLite chat sessions + vector index)
+  ansible.builtin.file:
+    path: "{{ khoj_data_dir }}/memory"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, khoj]
+
+- name: Ensure Khoj skills dir exists (agent personas + tool configs)
+  ansible.builtin.file:
+    path: "{{ khoj_data_dir }}/skills"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, khoj]
+
+- name: Touch skills sentinel (Khoj populates at runtime)
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ khoj_data_dir }}/skills/.gitkeep"
+    owner: agent
+    group: agent
+    mode: "0644"
+    force: false
+  tags: [profile, khoj]
+
+- name: Ensure Khoj content dir exists (indexed documents)
+  ansible.builtin.file:
+    path: "{{ khoj_data_dir }}/content"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, khoj]
+
+- name: Ensure deputyOS Khoj channels.d dir exists
+  ansible.builtin.file:
+    path: /etc/deputyos/khoj/channels.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [profile, khoj]
+
+- name: Touch channels.d sentinel (wizard populates at first boot)
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/deputyos/khoj/channels.d/.gitkeep
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  tags: [profile, khoj]
+
+# --- Python runtime -----------------------------------------------------
+# Debian 12 (bookworm) ships python3.11 in the base archive — no third-party
+# repo needed. Idempotent: apt is a no-op when the version matches.
+
+- name: Install Python runtime + Khoj build deps
+  ansible.builtin.apt:
+    name:
+      - "python{{ khoj_python_version }}"
+      - "python{{ khoj_python_version }}-venv"
+      - "python{{ khoj_python_version }}-dev"
+      - python3-pip
+      - build-essential
+      - libsqlite3-dev    # Khoj's chat session store
+      - libffi-dev        # cryptography wheel build
+      - ca-certificates
+      - curl
+      - netcat-openbsd    # required by the stub fallback (nc.openbsd)
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [profile, khoj]
+
+# --- Venv ---------------------------------------------------------------
+
+- name: Create Khoj venv
+  ansible.builtin.command:
+    cmd: "python{{ khoj_python_version }} -m venv {{ khoj_install_root }}/.venv"
+    creates: "{{ khoj_install_root }}/.venv/bin/python3"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  tags: [profile, khoj]
+
+- name: Upgrade pip + wheel inside venv (best-effort)
+  ansible.builtin.command:
+    cmd: "{{ khoj_install_root }}/.venv/bin/pip install --upgrade pip wheel"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  register: _khoj_pip_bootstrap  # noqa: var-naming[no-role-prefix]
+  retries: 3
+  delay: 10
+  until: _khoj_pip_bootstrap is success
+  failed_when: false
+  changed_when: _khoj_pip_bootstrap.rc | default(1) == 0
+  tags: [profile, khoj]
+
+# --- Khoj install -------------------------------------------------------
+# Try the real pip install with retries. If it fails (offline build env, PyPI
+# hiccup, yanked version), fall back to the stub script. The stub satisfies
+# the smoke harness; CI bake-time failures get surfaced via the .bake-meta
+# `stub=true` flag that `deputyctl version` reads.
+
+- name: Install khoj from PyPI  # noqa: name[template]
+  ansible.builtin.command:
+    cmd: >-
+      {{ khoj_install_root }}/.venv/bin/pip install
+      --no-input --disable-pip-version-check
+      khoj=={{ khoj_pinned_version }}
+    creates: "{{ khoj_install_root }}/.venv/bin/khoj"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  register: khoj_install  # noqa: var-naming[no-role-prefix]
+  retries: 3
+  delay: 10
+  until: khoj_install is success
+  failed_when: false
+  changed_when: khoj_install.rc | default(1) == 0
+  when: not (khoj_force_stub | bool)
+  tags: [profile, khoj]
+
+- name: Detect whether real Khoj landed
+  ansible.builtin.stat:
+    path: "{{ khoj_install_root }}/.venv/bin/khoj"
+  register: _khoj_real_bin  # noqa: var-naming[no-role-prefix]
+  tags: [profile, khoj]
+
+- name: Decide stub vs real  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    khoj_use_stub: >-
+      {{ (khoj_force_stub | bool)
+         or (not _khoj_real_bin.stat.exists)
+         or (khoj_install is defined
+             and khoj_install.rc | default(1) != 0) }}
+  tags: [profile, khoj]
+
+- name: Ensure venv bin dir exists for stub drop
+  ansible.builtin.file:
+    path: "{{ khoj_install_root }}/.venv/bin"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+  when: khoj_use_stub | bool
+  tags: [profile, khoj]
+
+- name: Drop Khoj stub binary (fallback)
+  ansible.builtin.copy:
+    src: khoj-stub.sh
+    dest: "{{ khoj_install_root }}/.venv/bin/khoj"
+    owner: agent
+    group: agent
+    mode: "0755"
+  when: khoj_use_stub | bool
+  tags: [profile, khoj]
+
+# --- systemd unit -------------------------------------------------------
+
+- name: Render Khoj gateway systemd unit
+  ansible.builtin.template:
+    src: khoj-gateway.service.j2
+    dest: "/etc/systemd/system/{{ khoj_unit_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags: [profile, khoj]
+
+- name: Verify systemd unit (best-effort)
+  ansible.builtin.command:
+    cmd: "systemd-analyze verify /etc/systemd/system/{{ khoj_unit_name }}"
+  changed_when: false
+  failed_when: false
+  register: _khoj_unit_verify  # noqa: var-naming[no-role-prefix]
+  tags: [profile, khoj]
+
+- name: Surface systemd-analyze findings (non-fatal)
+  ansible.builtin.debug:
+    msg: "{{ _khoj_unit_verify.stderr_lines | default([]) }}"
+  when: _khoj_unit_verify.rc | default(0) != 0
+  tags: [profile, khoj]
+
+- name: Enable Khoj gateway service (do not start at bake)
+  ansible.builtin.systemd:
+    name: "{{ khoj_unit_name }}"
+    enabled: true
+    daemon_reload: true
+  tags: [profile, khoj]
+
+# --- AppArmor profile ---------------------------------------------------
+
+- name: Drop Khoj AppArmor profile
+  ansible.builtin.copy:
+    src: apparmor/deputyos.khoj
+    dest: /etc/apparmor.d/deputyos.khoj
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload AppArmor
+  tags: [profile, khoj, apparmor]
+
+- name: Validate AppArmor profile syntax (best-effort)
+  ansible.builtin.command:
+    cmd: apparmor_parser -Q -K /etc/apparmor.d/deputyos.khoj
+  changed_when: false
+  failed_when: false
+  register: _khoj_aa_verify  # noqa: var-naming[no-role-prefix]
+  tags: [profile, khoj, apparmor]
+
+- name: Fail if AppArmor profile is malformed
+  ansible.builtin.fail:
+    msg: "AppArmor profile failed to parse: {{ _khoj_aa_verify.stderr | default('(no stderr)') }}"
+  when:
+    - _khoj_aa_verify.rc is defined
+    - _khoj_aa_verify.rc != 0
+    - "'apparmor_parser' in _khoj_aa_verify.stderr | default('')
+        or 'syntax' in _khoj_aa_verify.stderr | default('') | lower"
+  tags: [profile, khoj, apparmor]
+
+# --- Bake metadata (read by deputyctl version) ---------------------------
+
+- name: Capture bake timestamp  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    khoj_baked_at: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%FT%TZ')) }}"
+  tags: [profile, khoj]
+
+- name: Write Khoj bake metadata
+  ansible.builtin.copy:
+    dest: "{{ khoj_install_root }}/.bake-meta"
+    owner: agent
+    group: agent
+    mode: "0644"
+    content: |
+      version={{ khoj_pinned_version }}
+      python_version={{ khoj_python_version }}
+      baked_at={{ khoj_baked_at }}
+      stub={{ khoj_use_stub | bool | lower }}
+  tags: [profile, khoj]

@@ -1,0 +1,133 @@
+#include <tunables/global>
+
+# AppArmor profile for the deputyOS voice relay shim, baked at image-build
+# time by tasks/voice-baseline.yml.
+# Path: /etc/apparmor.d/deputyos.voice-relay
+# Reload: apparmor_parser -r /etc/apparmor.d/deputyos.voice-relay
+#
+# Confinement intent (docs/09-security.md §AppArmor +
+#                     docs/11-roadmap.md §M6 Lane Voice):
+#   * read+exec the bridge script + the bake-pinned tools it shells out to
+#     (whisper-cli, piper, jq, nc.openbsd, aplay, awk, sed, tr, sleep)
+#   * read /etc/deputyos/voice.toml + /opt/deputyos/voice/** (binaries, models)
+#   * read+write /dev/snd/** for live audio capture and playback
+#   * unix-stream socket access for /run/deputyos/relay.sock
+#   * inet network for any voice models that phone home (tiny.en is fully
+#     offline; we keep the door open so future cloud-STT options can opt in
+#     without a profile rewrite). DNS resolution piggybacks on
+#     abstractions/nameservice.
+#   * NO mount, NO ptrace of others, NO capability beyond audio access.
+
+profile deputyos.voice-relay /opt/deputyos/voice/voice-relay.sh flags=(enforce) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/audio>
+  #include <abstractions/openssl>
+
+  # Shell + the helpers voice-relay.sh shells out to.
+  /usr/bin/bash                                       ix,
+  /usr/bin/dash                                       ix,
+  /usr/bin/awk                                        ix,
+  /usr/bin/gawk                                       ix,
+  /usr/bin/mawk                                       ix,
+  /usr/bin/sed                                        ix,
+  /usr/bin/tr                                         ix,
+  /usr/bin/cat                                        ix,
+  /usr/bin/sleep                                      ix,
+  /usr/bin/printf                                     ix,
+  /usr/bin/echo                                       ix,
+  /usr/bin/jq                                         ix,
+  /usr/bin/nc.openbsd                                 ix,
+  /usr/bin/aplay                                      ix,
+
+  # Voice install tree (read+exec). Models are .bin / .onnx / .onnx.json
+  # blobs; binaries live alongside.
+  /opt/deputyos/voice/                                 r,
+  /opt/deputyos/voice/**                               r,
+  /opt/deputyos/voice/voice-relay.sh                   ixr,
+  /opt/deputyos/voice/whisper-cli                      ix,
+  /opt/deputyos/voice/piper                            ix,
+  /opt/deputyos/voice/**.so*                           mr,
+
+  # deputyOS shared config (read-only).
+  /etc/deputyos/                                       r,
+  /etc/deputyos/voice.toml                             r,
+  /etc/deputyos/secrets.env                            r,
+  /etc/deputyos/limits.json                            r,
+
+  # Soundcard — required relaxation. The audio-group membership covers
+  # filesystem perms; AppArmor mediation must additionally allow rw.
+  /dev/snd/                                           r,
+  /dev/snd/*                                          rw,
+  /dev/snd/**                                         rw,
+  /proc/asound/                                       r,
+  /proc/asound/**                                     r,
+  /sys/class/sound/                                   r,
+  /sys/class/sound/**                                 r,
+  /sys/devices/**/sound/**                            r,
+
+  # Runtime state — the relay socket, the audio service's own scratch.
+  /run/deputyos/                                       r,
+  /run/deputyos/relay.sock                             rw,
+  owner /var/lib/deputyos/                             rw,
+  owner /var/lib/deputyos/**                           rwk,
+
+  # Common readables (mirrors deputyos.openclaw).
+  /etc/ld.so.cache                                    r,
+  /etc/ld.so.preload                                  r,
+  /etc/ssl/openssl.cnf                                r,
+  /etc/resolv.conf                                    r,
+  /etc/nsswitch.conf                                  r,
+  /etc/host.conf                                      r,
+  /etc/hosts                                          r,
+  /etc/localtime                                      r,
+  /etc/asound.conf                                    r,
+  /sys/devices/system/cpu/online                      r,
+  /proc/sys/kernel/random/uuid                        r,
+  /proc/cpuinfo                                       r,
+  /proc/meminfo                                       r,
+  /proc/stat                                          r,
+  /proc/loadavg                                       r,
+  /proc/uptime                                        r,
+  /proc/*/status                                      r,
+  /proc/*/cmdline                                     r,
+  /proc/*/stat                                        r,
+
+  # Network — unix stream for relay; inet stream/dgram for any
+  # future cloud-STT path. tiny.en is fully offline so inet is
+  # never used in the M6 default path.
+  network unix stream,
+  network unix dgram,
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network netlink raw,
+
+  # Capabilities — none beyond abstractions/audio. Notably we do NOT
+  # grant CAP_SYS_NICE: the audio group + Nice=-5 in the unit cover
+  # latency without elevating privileges. CAP_SYS_ADMIN is denied so
+  # we cannot reroute /dev/snd via mount tricks.
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_ptrace,
+  deny capability sys_rawio,
+  deny capability sys_nice,
+  deny capability dac_override,
+  deny capability dac_read_search,
+  deny capability mac_admin,
+  deny capability mac_override,
+
+  # Deny risky paths.
+  deny /tmp/**           wx,
+  deny /var/tmp/**       wx,
+  deny /root/**          rwlk,
+  deny /home/[^a]*/**    rwlk,
+  deny /etc/shadow       rwlk,
+  deny /etc/sudoers      rwlk,
+  deny /etc/sudoers.d/** rwlk,
+
+  # Self-only signals + ptrace.
+  signal (send,receive) peer=deputyos.voice-relay,
+  ptrace (read,trace)   peer=deputyos.voice-relay,
+}

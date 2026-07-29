@@ -1,0 +1,78 @@
+---
+# watchdog-baseline.yml — install the boot-count watchdog that detects
+# repeated boot failures and auto-rolls back to the previous A/B slot.
+#
+# Applied on every target that supports A/B (x86_64-mini-pc, rpi5, rpi4,
+# arm64-generic, macos-qemu, qemu-*). Cloud targets skip this (they use
+# snapshot-based rollback, not A/B partitions).
+
+- name: "Watchdog: install deputyos-watchdog systemd unit"
+  ansible.builtin.template:
+    src: deputyos-watchdog.service.j2
+    dest: /etc/systemd/system/deputyos-watchdog.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_watchdog_unit
+
+- name: "Watchdog: enable deputyos-watchdog.service (do not start at bake)"
+  ansible.builtin.systemd:
+    name: deputyos-watchdog.service
+    enabled: true
+    daemon_reload: true
+    # Intentionally no `state:`. This is a Before=basic.target early-boot
+    # oneshot that increments the boot counter and may auto-rollback+reboot.
+    # It must NOT be started during provisioning: there is no boot to
+    # watchdog against at bake time, and a stale/malformed slots.json would
+    # make ExecStart exit non-zero (or, if boot_count>=3, trigger a mid-bake
+    # reboot — destroying the build). Enable it now; it runs at the next
+    # real boot. This mirrors wizard/tunnel/poller/gateway units, which are
+    # all enabled-but-not-started at bake ("first boot starts the unit").
+
+- name: "Watchdog: install post-boot update confirmation unit"
+  ansible.builtin.template:
+    src: deputyos-watchdog-confirm.service.j2
+    dest: /etc/systemd/system/deputyos-watchdog-confirm.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_watchdog_confirm_unit
+
+- name: "Watchdog: enable post-boot update confirmation"
+  ansible.builtin.systemd:
+    name: deputyos-watchdog-confirm.service
+    enabled: true
+    daemon_reload: "{{ _deputyos_watchdog_confirm_unit is changed }}"
+
+- name: "Updates: configure safe automatic mode"
+  ansible.builtin.copy:
+    dest: /etc/deputyos/auto-update
+    content: "{{ deputyos_auto_update_mode }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Updates: install signed update cycle service"
+  ansible.builtin.template:
+    src: deputyos-update-cycle.service.j2
+    dest: /etc/systemd/system/deputyos-update-cycle.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_update_service
+
+- name: "Updates: install daily update timer"
+  ansible.builtin.template:
+    src: deputyos-update-cycle.timer.j2
+    dest: /etc/systemd/system/deputyos-update-cycle.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_update_timer
+
+- name: "Updates: enable signed daily update cycle"
+  ansible.builtin.systemd:
+    name: deputyos-update-cycle.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ _deputyos_update_service is changed or _deputyos_update_timer is changed }}"

@@ -1,0 +1,55 @@
+[package]
+name = "deputyos-console"
+version = "0.1.0"
+description = "Cross-platform desktop console for deputyOS — logs into the API and manages multiple local and remote (tunneled) agents."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "deputyos_console"
+path = "src/lib.rs"
+
+# The GUI binary (Tauri webview shell) only builds with the `gui` feature,
+# which pulls tauri + keyring and requires the host's webview build deps
+# (libwebkit2gtk-4.1-dev, libgtk-3-dev on Linux). The library core — api
+# client, token store, instance operations — builds and tests with no
+# extra system deps, so `cargo test -p deputyos-console` runs anywhere.
+[[bin]]
+name = "deputyos-console"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[features]
+default = []
+gui = ["dep:tauri", "dep:tauri-build", "dep:keyring"]
+
+[dependencies]
+# Instance registry + driver + signed-artefact install flow.
+deputyos-desktop = { path = "../deputyos-desktop" }
+deputyd = { package = "deputyd-protocol", path = "../deputyd-protocol" }
+anyhow = "1.0"
+# JWT payload decode (base64url) to read the account `sub` for display — the
+# signature is verified server-side on each call, so this is non-trusting.
+base64 = "0.22"
+dirs = "5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+# Same minimal HTTP client deputyctl/deputyos-desktop use.
+ureq = { version = "2.10", default-features = false, features = ["tls", "json"] }
+
+# GUI-only deps (the `gui` feature). Keep them out of the default build so
+# the testable core has no webview/keychain system requirements.
+tauri = { version = "2", optional = true, features = [] }
+keyring = { version = "3", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+httpmock = "0.7"
+
+[lints]
+workspace = true

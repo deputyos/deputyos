@@ -1,0 +1,109 @@
+---
+# x86_64 mini-PC variant — for real Beelink/MeLE/NUC-class hardware,
+# not for QEMU. Per docs/03-image-builds.md §"Per-target tuning highlights"
+# the x86_64-mini-pc column.
+#
+# Note: this variant is not smoke-tested in CI (no real mini-PC in CI);
+# the role must `ansible-lint` clean and syntax-check with hw=x86_64-mini-pc.
+# A contributor with a mini-PC runs `make build TARGET=x86_64-mini-pc`.
+
+- name: Set x86_64-mini-pc facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    # Minis tend to ship 8-16GB; 16384 is the upper-end default. The
+    # bake-time fact mostly drives /etc/deputyos/limits.json and downstream
+    # `deputyctl doctor` thresholds; runtime usage is queried separately.
+    deputyos_target_ram_mb: 16384
+    deputyos_target_storage_class: "nvme"
+
+- name: Install cpufrequtils
+  ansible.builtin.apt:
+    name: cpufrequtils
+    state: present
+
+- name: Set CPU governor to schedutil
+  ansible.builtin.copy:
+    dest: /etc/default/cpufrequtils
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. schedutil is the modern x86 default — better
+      # than ondemand on multi-core mobile-class CPUs (per docs/03 table).
+      GOVERNOR="schedutil"
+
+- name: Enable cpufrequtils
+  ansible.builtin.service:
+    name: cpufrequtils
+    enabled: true
+
+- name: Install CPU microcode (Intel + AMD)
+  # Both packages are cheap (<10MB) and only the matching one loads at
+  # boot — Intel CPUs ignore amd64-microcode and vice-versa. No bake-time
+  # CPU detection needed; install both so the same image boots on any
+  # x86_64 mini-PC.
+  ansible.builtin.apt:
+    name:
+      - intel-microcode
+      - amd64-microcode
+    state: present
+    install_recommends: false
+
+- name: Ensure mainline x86_64 kernel is installed
+  ansible.builtin.apt:
+    name: linux-image-amd64
+    state: present
+
+# TODO(M6): full UEFI A/B with systemd-boot + boot-counting (see
+# docs/08-update-rollback.md). For now we ship a single-slot image —
+# same level of stub as variant-rpi5.yml's tryboot comment.
+- name: Note systemd-boot A/B is M6
+  ansible.builtin.debug:
+    msg: "systemd-boot A/B + boot-counting deferred to M6 (see docs/08-update-rollback.md)"
+
+# WiFi power-save — mirror the qemu-aarch64 / generic-arm variants. On a
+# wired-only mini-PC this oneshot is a no-op; on a WiFi-capable mini it
+# disables `iwconfig wlan0 power off`-equivalent NetworkManager defaults.
+- name: Drop wifi-power-save-off oneshot unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-wifi-powersave-off.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. WiFi power-save introduces multi-second
+      # latency spikes that break voice + chat — force-off at boot.
+      [Unit]
+      Description=deputyOS — disable WiFi power-save
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/sh -c 'for f in /sys/class/net/wl*/device/power/control; \
+        do [ -e "$f" ] && echo on > "$f"; done; true'
+      RemainAfterExit=true
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable wifi-power-save-off oneshot
+  ansible.builtin.systemd:
+    name: deputyos-wifi-powersave-off.service
+    enabled: true
+    daemon_reload: true
+
+# ---------- M3.5: Removable drive auto-mount ----------
+- name: Mounts-x86_64 | enable removable-drive auto-mount in policy
+  ansible.builtin.shell: |
+    set -euo pipefail
+    POLICY="{{ deputyos_etc_dir }}/mounts-policy.json"
+    if [[ -f "$POLICY" ]] && command -v jq >/dev/null 2>&1; then
+      tmp=$(mktemp)
+      jq '.removable.enabled = true | .removable.auto_mount = true' "$POLICY" > "$tmp"
+      mv "$tmp" "$POLICY"
+      echo "x86_64-mini-pc: removable auto-mount enabled in mounts policy"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false

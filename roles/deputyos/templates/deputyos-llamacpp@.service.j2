@@ -1,0 +1,45 @@
+[Unit]
+Description=deputyOS local LLM (llama.cpp) — model %i
+After=network.target
+Documentation=https://www.deputyos.com/docs/concepts/airgap/
+
+[Service]
+Type=simple
+# %i is the model id (e.g. LFM2-1.2B). Per-instance port + model filename come
+# from the env file written at bake time (tasks/llm-airgap.yml) or at runtime
+# (`deputyctl model register`), so two simultaneously-enabled models bind distinct
+# ports and the exact on-disk filename (which is NOT always %i.Q4_K_M.gguf —
+# e.g. Qwen ships as Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf) is honoured.
+EnvironmentFile={{ deputyos_airgap_env_dir }}/%i.env
+ExecStart=/usr/local/bin/llama-server \
+  --model {{ deputyos_airgap_models_root }}/${LLAMACPP_MODEL_FILE} \
+  --host 127.0.0.1 \
+  --port ${LLAMACPP_PORT} \
+  --n-gpu-layers 0 \
+  --threads {{ ansible_processor_vcpus | default(2) }} \
+  --ctx-size 4096
+Restart=on-failure
+RestartSec=5
+
+# Resource caps — keep the LLM from starving the wizard / agent / channels.
+MemoryHigh={{ (deputyos_target_ram_mb * 0.6) | int }}M
+MemoryMax={{ (deputyos_target_ram_mb * 0.7) | int }}M
+TasksMax=512
+
+# Hardening (matches roles/deputyos/templates/openclaw.service.j2 baseline).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths={{ deputyos_airgap_models_root }}
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

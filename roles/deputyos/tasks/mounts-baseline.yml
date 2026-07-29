@@ -1,0 +1,111 @@
+---
+# Drive-mounting baseline (M3.5).
+#
+# Always-on. The policy file is dropped on every image so `deputyctl mounts`
+# can read/write it consistently. Per-variant mount surfaces (WSL2 host-FS
+# passthrough, bare-metal udev for removable, SMB/NFS) are layered in
+# variant-*.yml files when M3.5 ships fully.
+
+- name: Mounts | ensure /etc/deputyos/mounts.d directory exists
+  ansible.builtin.file:
+    path: "{{ deputyos_etc_dir }}/mounts.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mounts | drop default mounts-policy.json (empty allow-list)
+  ansible.builtin.copy:
+    dest: "{{ deputyos_etc_dir }}/mounts-policy.json"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false  # never clobber a user-edited policy on update
+    content: |
+      {
+        "$schema": "https://www.deputyos.com/schemas/mounts-policy-v1.json",
+        "version": 1,
+        "host_fs": [],
+        "removable": {
+          "enabled": false,
+          "auto_mount": false,
+          "default_mode": "ro",
+          "mount_options_unknown_fs": "nosuid,nodev,noexec"
+        },
+        "network": []
+      }
+
+- name: Mounts | ensure /mnt/deputyos exists with sticky-safe perms
+  ansible.builtin.file:
+    path: /mnt/deputyos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mounts | ensure /run/deputyos exists for runtime mount state
+  ansible.builtin.file:
+    path: /run/deputyos
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mounts | install deputyos-mount-removable.sh helper
+  ansible.builtin.copy:
+    src: ../../../scripts/runtime/deputyos-mount-removable.sh
+    dest: /usr/local/lib/deputyos/deputyos-mount-removable.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mounts | install removable-drive udev rule
+  ansible.builtin.copy:
+    src: udev/99-deputyos-removable.rules
+    dest: /etc/udev/rules.d/99-deputyos-removable.rules
+    owner: root
+    group: root
+    mode: "0644"
+  notify: mounts reload udev
+
+# variant-*.yml may further extend with virtiofs / WSL2 / SMB / NFS bake.
+# Those layers are gated on deputyos_hw and the policy file's `network`
+# array; this baseline only ships the always-on substrate.
+
+- name: "Mounts: install materialiser script"
+  # ExecStart of deputyos-mounts.service. Must be installed BEFORE the unit
+  # is started below, or systemd fails with "control process exited with
+  # error code" (ExecStart points at a not-yet-existing script).
+  ansible.builtin.copy:
+    src: ../../../scripts/runtime/deputyos-mount-materialise.sh
+    dest: /usr/local/lib/deputyos/deputyos-mount-materialise.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Mounts: install deputyos-mounts systemd unit"
+  ansible.builtin.template:
+    src: deputyos-mounts.service.j2
+    dest: /etc/systemd/system/deputyos-mounts.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _deputyos_mounts_unit
+
+- name: "Mounts: enable deputyos-mounts.service"
+  # Materialise configured host-FS / network mounts at boot, ahead of the
+  # first-boot wizard. Without this the unit was installed but never
+  # enabled, so mounts only appeared after a manual `deputyctl mounts apply`.
+  ansible.builtin.systemd:
+    name: deputyos-mounts.service
+    enabled: true
+    daemon_reload: true
+    state: "{{ 'restarted' if _deputyos_mounts_unit is changed else 'started' }}"
+
+- name: "Mounts: install cifs-utils + nfs-common on standard+ tier"
+  ansible.builtin.apt:
+    name:
+      - cifs-utils
+      - nfs-common
+    state: present
+  when: deputyos_tier != "lean"

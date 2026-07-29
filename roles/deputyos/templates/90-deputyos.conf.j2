@@ -1,0 +1,32 @@
+# managed by deputyos -- see roles/deputyos/templates/90-deputyos.conf.j2
+# Sysctl bundle. Reference: docs/00-architecture.md §"Kernel & system tuning"
+# and docs/09-security.md §sysctl. Edit the template, not this file.
+
+# --- Kernel hardening
+kernel.kptr_restrict = 1
+kernel.dmesg_restrict = 1
+kernel.unprivileged_bpf_disabled = 1
+net.core.bpf_jit_harden = 2
+kernel.yama.ptrace_scope = 1
+
+# --- Network hardening
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv4.conf.all.accept_redirects = 0
+
+# --- Throughput / queue tuning (bbr requires the tcp_bbr module; Debian
+#     bookworm cloud kernels ship it built-in).
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+
+# --- Memory pressure (see docs/13-memory-pressure.md). zram makes
+#     swappiness=10 the right default for every tier.
+vm.swappiness = 10
+vm.vfs_cache_pressure = 50
+
+{% if deputyos_profile == "hermes" %}
+# Hermes' command-execution sandbox uses unprivileged user namespaces.
+kernel.unprivileged_userns_clone = 1
+{% endif %}

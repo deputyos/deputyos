@@ -1,0 +1,40 @@
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!--
+  Managed by deputyos. Rendered from
+  roles/deputyos/templates/avahi-deputyos.service.j2 by
+  tasks/networking-baseline.yml. Publishes the wizard and the agent's
+  chat endpoint under {{ deputyos_mdns_hostname }}.local on the LAN.
+
+  Reference: docs/07-networking.md §mDNS.
+
+  Three records:
+    1. _workstation._tcp on 22  — SSH browsers (Finder, GNOME Files) see
+       deputyOS hosts the same way they see any Linux desktop.
+    2. _https._tcp on {{ deputyos_wizard_port }} with path=/wizard — the
+       first-boot wizard. TLS termination is in front of axum (M3-rest).
+    3. _http._tcp on 8080 with path=/chat — the agent chat endpoint;
+       the profile-specific gateway service binds here when active.
+-->
+<service-group>
+  <name replace-wildcards="yes">deputyOS on %h</name>
+
+  <service>
+    <type>_workstation._tcp</type>
+    <port>22</port>
+  </service>
+
+  <service>
+    <type>_https._tcp</type>
+    <port>{{ deputyos_wizard_port }}</port>
+    <txt-record>path=/wizard</txt-record>
+    <txt-record>deputyos=wizard</txt-record>
+  </service>
+
+  <service>
+    <type>_http._tcp</type>
+    <port>8080</port>
+    <txt-record>path=/chat</txt-record>
+    <txt-record>deputyos=chat</txt-record>
+  </service>
+</service-group>

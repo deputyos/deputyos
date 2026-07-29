@@ -1,0 +1,45 @@
+---
+# Hooks baseline — Phase 5 Lane B.
+#
+# Builds out the /etc/deputyos/hooks.d/ directory tree the agent fires
+# on standard lifecycle events. Convention:
+#   * Each event has its own subdirectory.
+#   * Files inside are executed in lexical order.
+#   * They read a single JSON event payload from stdin.
+#   * Exit 0 = success; non-zero is logged.
+#   * Hooks shipped by the role end with `.disabled` and lack the
+#     executable bit. Operators rename + chmod +x to opt in.
+#
+# Reference: docs/01-getting-started.md §hooks (M2).
+
+- name: Ensure /etc/deputyos/hooks.d root exists
+  ansible.builtin.file:
+    path: "{{ deputyos_hooks_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure hooks event directories exist
+  ansible.builtin.file:
+    path: "{{ deputyos_hooks_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - pre-message
+    - post-message
+    - cost-alert
+    - update-applied
+
+- name: Drop disabled example hook (update-applied)
+  ansible.builtin.copy:
+    src: deputyctl-hook-example.sh
+    dest: "{{ deputyos_hooks_dir }}/update-applied/00-example.sh.disabled"
+    owner: root
+    group: root
+    # Intentionally NOT 0755 — the .disabled suffix + non-executable
+    # bit form the deliberate "off by default" convention. Operators
+    # `mv 00-example.sh.disabled 00-example.sh && chmod +x` to enable.
+    mode: "0644"

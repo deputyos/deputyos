@@ -1,0 +1,91 @@
+# Managed by deputyos. Rendered from
+# roles/deputyos/templates/deputyos-voice-relay.service.j2 by
+# tasks/voice-baseline.yml. Reference: docs/11-roadmap.md §M6 Lane A/B/F.
+#
+# The voice-relay is the audio-side bridge: it captures via whisper-cli,
+# detects the wake-word, forwards transcriptions to the agent through
+# /run/deputyos/relay.sock as a `pre-message` hook (source="voice"
+# convention — not a new HookKind), and pipes the agent's reply back
+# through Piper to /dev/snd/.
+#
+# HARDENING TRADE-OFFS (read before tightening):
+#   - DeviceAllow=/dev/snd/* rw is REQUIRED. Without it the service
+#     can't open the soundcard regardless of group membership.
+#   - RestrictRealtime=false: ALSA + Piper can want SCHED_FIFO/RR for
+#     glitch-free playback under load. We allow it; CAP_SYS_NICE is
+#     not granted (the audio group + nice=-10 below is sufficient on
+#     stock Debian/Ubuntu kernels).
+#   - ProtectHome=read-only: voice-relay.sh shells out to whisper-cli
+#     and piper which never touch /home. Hardening matches the
+#     OpenClaw gateway profile.
+#   - The unit refuses to start until /etc/deputyos/voice.toml has
+#     enabled=true AND the message-relay socket exists. The first
+#     gate prevents accidental mic capture on a fresh image; the
+#     second avoids racing with the agent at boot.
+
+[Unit]
+Description=deputyOS voice relay (whisper.cpp + Piper bridge)
+Documentation=https://github.com/dipankarn/deputyOS/blob/main/docs/11-roadmap.md
+After=network-online.target sound.target
+Wants=network-online.target
+# TODO(M7-rest): Lane M7's message-relay does not yet have its own
+# systemd unit (it runs via `deputyctl --internal-run-relay`). When it
+# does, add: After=deputyos-relay.service Requires=deputyos-relay.service
+# For now we gate on the socket file as a soft-dependency.
+ConditionPathExists=/etc/deputyos/voice.toml
+ConditionPathExists=/opt/deputyos/voice/voice-relay.sh
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+SupplementaryGroups=audio
+WorkingDirectory=/var/lib/deputyos
+EnvironmentFile=-/etc/deputyos/secrets.env
+ExecStart=/opt/deputyos/voice/voice-relay.sh
+Restart=on-failure
+RestartSec=5
+Nice=-5
+
+# Audio devices — the load-bearing relaxation for this service.
+# Default systemd hardening hides /dev/snd; we re-grant explicit rw.
+DeviceAllow=/dev/snd/* rw
+DevicePolicy=closed
+PrivateDevices=false
+
+# FS hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/deputyos /var/lib/deputyos
+ReadOnlyPaths=/etc/deputyos /opt/deputyos/voice
+
+# Kernel + capability lockdown
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
+
+# Audio needs realtime priority — see hardening note at top.
+RestrictRealtime=false
+# piper's onnxruntime JITs at startup; can't deny W^X.
+MemoryDenyWriteExecute=false
+
+# Capability set — keep tight; CAP_SYS_NICE is NOT granted (the
+# audio group + Nice=-5 covers our latency budget; SCHED_FIFO needs
+# RLIMIT_RTPRIO, which Debian's default 0 limit happily denies for
+# unprivileged audio-group members and the kernel falls back to
+# SCHED_OTHER cleanly).
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

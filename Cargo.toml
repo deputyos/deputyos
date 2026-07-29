@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["deputyctl", "deputyd-protocol", "deputyos-console", "deputyos-desktop", "deputyos-track", "deputypwa", "deputywizard"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/deputyos/deputyos"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Tighten as the codebase grows; deny warnings is set at the cargo level in CI.
+unwrap_used = "warn"

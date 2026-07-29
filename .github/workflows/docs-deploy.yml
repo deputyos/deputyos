@@ -1,0 +1,46 @@
+---
+name: docs-deploy
+
+# Builds the MkDocs site under documentation/ and publishes to the
+# Cloudflare Pages project `deputyos-docs`, served at https://docs.deputyos.com.
+# Thin wrapper around `make docs-build`. CI does no extra work that a
+# contributor can't run locally with `make docs` (serve) or `make docs-build`
+# (static build).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "documentation/**"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Install MkDocs + plugins
+        run: pip install -r requirements-docs.txt
+
+      - name: Build MkDocs site (strict)
+        run: make docs-build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy documentation/site --project-name=deputyos-docs --branch=main

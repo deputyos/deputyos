@@ -1,0 +1,39 @@
+---
+# Linode (Akamai) variant — cloud-init-recipe target (no custom snapshot).
+#
+# Same shape as variant-hetzner-cloud.yml: no Packer template, the
+# product is cloud-init/linode.yaml that the user pastes into Linode's
+# StackScript / cloud-init metadata field at instance creation.
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — linode row.
+#   docs/14-limitations.md    §"hetzner / vultr / linode".
+#
+# Sizing: Nanode 1 GB is below floor; Linode 2 GB or Linode 4 GB is the
+# realistic entry. We default the limits.json to 4 GB to match what the
+# wizard recommends.
+
+- name: Set linode facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 4096
+    deputyos_target_storage_class: "block"
+    deputyos_cloud: "linode"
+
+- name: Ensure cloud-init is present
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"

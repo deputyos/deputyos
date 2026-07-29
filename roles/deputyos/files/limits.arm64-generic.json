@@ -1,0 +1,61 @@
+{
+  "_comment": "Per-target limits for arm64-generic (Radxa, Orange Pi, Khadas, Le Potato, ...). Best-effort target \u2014 per-board quirks are inherited at runtime, not baked in. Copied to /etc/deputyos/limits.json at bake time. Schema in deputyctl/src/limits.rs. See docs/14-limitations.md \u00a7'arm64-generic'.",
+  "target": "arm64-generic",
+  "tier": "standard",
+  "ram_mb": 4096,
+  "ram_class": "standard",
+  "storage_class": "ssd",
+  "capabilities": {
+    "local_llm": false,
+    "voice_wake_word": false,
+    "voice_tts": false,
+    "clamav_daemon": true,
+    "channels_heavy": [
+      "telegram",
+      "slack",
+      "discord"
+    ],
+    "channels_disabled_by_ram": [
+      "whatsapp-cloud-webhook"
+    ]
+  },
+  "limitations": [
+    {
+      "id": "best-effort-target",
+      "reason": "arm64-generic covers a long tail of SBCs we don't individually test; per-board quirks (device-tree overlay, audio routing, video output, thermal envelope) are the user's responsibility",
+      "unblock": "switch to rpi5 (officially supported) or x86_64-mini-pc"
+    },
+    {
+      "id": "per-board-quirks-inherited",
+      "reason": "Device-tree overlay, audio routing, and video output depend on the specific board; the wizard collects the overlay name on first boot",
+      "unblock": "provide your board's overlay name during the first-boot wizard"
+    },
+    {
+      "id": "no-npu-runtime-bundled",
+      "reason": "Hailo / Coral / OpenVINO not bundled \u2014 too fragmented across boards to ship by default",
+      "unblock": "sideload the runtime your board supports (see docs/12-bundled-software.md)"
+    },
+    {
+      "id": "no-local-llm",
+      "reason": "Generic arm64 default RAM (4 GB) below local-LLM threshold; even at 8GB, A-core class is unverified per board",
+      "unblock": "rpi5 8GB+ (verified) or x86_64-mini-pc"
+    },
+    {
+      "id": "no-voice-by-default",
+      "reason": "Voice and audio features depend on board-specific audio routing; disabled until the user supplies a working device-tree overlay",
+      "unblock": "supply the correct overlay during the first-boot wizard"
+    },
+    {
+      "id": "no-firmware-blobs-bundled",
+      "reason": "Vendor firmware (Mali GPU, board-specific WiFi) not installed at bake time; mainline arm64 kernel only",
+      "unblock": "install vendor firmware packages manually after first boot"
+    },
+    {
+      "id": "no-whatsapp-cloud-webhook",
+      "reason": "WhatsApp Cloud webhook RSS exceeds standard tier headroom",
+      "unblock": "upgrade to high-RAM tier"
+    }
+  ],
+  "airgap_supported": true,
+  "airgap_max_tier": "standard"
+}

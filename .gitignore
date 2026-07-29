@@ -1,0 +1,42 @@
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock IS committed for the deputyctl binary crate (binary projects pin).
+
+# Build artefacts
+/build/
+/deputyos-console/gen/
+*.qcow2
+*.img
+*.img.xz
+*.minisig
+*.sha256
+*.cosign.bundle
+
+# Local-publish dist tree (mirrors the CDN; dist/.gitkeep documents the layout).
+/dist/*
+!/dist/.gitkeep
+
+# Packer
+packer_cache/
+crash.log
+
+# Editor
+*.swp
+*.swo
+.idea/
+.vscode/
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local secrets — never commit
+*.key
+dev-keys/
+.env.local
+secrets.env
+
+# mkdocs build output (documentation/)
+documentation/site/

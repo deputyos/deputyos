@@ -1,0 +1,70 @@
+# deputyOS Proxmox VM config template.
+#
+# This file mirrors the on-disk format Proxmox writes to
+# /etc/pve/qemu-server/<vmid>.conf. It is NOT consumed directly by
+# Proxmox — Proxmox builds these from `qm create` invocations. Use
+# this file as a known-good reference of the fields deputyOS expects.
+#
+# See README.md in this directory for the recommended `qm create` +
+# `qm importdisk` invocation. Substitute <VMID> with a free vmid on
+# your Proxmox host (e.g. 200).
+#
+# Reference: docs/14-limitations.md §"proxmox / unraid / truenas".
+
+# ---- identity ----
+name: deputyos
+# Stable hostname inside the guest.
+hostname: deputyos
+
+# ---- CPU / memory ----
+# 2 vCPU + 2 GB is the smallest sane allocation for the standard
+# tier. Bump to 4 vCPU + 4 GB for the rich tier or for active
+# browser-automation workloads.
+cores: 2
+memory: 2048
+cpu: host
+sockets: 1
+
+# ---- firmware ----
+# OVMF (UEFI) — deputyOS qcow2 images are EFI-only.
+bios: ovmf
+machine: q35
+# EFI vars disk — Proxmox auto-creates this when you run
+# `qm set <vmid> --efidisk0 <storage>:1,format=qcow2,efitype=4m,pre-enrolled-keys=0`
+# See README.md for the full create sequence.
+# efidisk0: local-lvm:vm-<VMID>-disk-1,efitype=4m,pre-enrolled-keys=0,size=4M
+
+# ---- networking ----
+# Bridge to vmbr0 (the default Proxmox bridge). Adjust if your host
+# uses a different bridge name.
+net0: virtio,bridge=vmbr0,firewall=1
+
+# ---- storage ----
+# Boot disk: the deputyOS qcow2 imported via `qm importdisk`.
+# After import, Proxmox writes a line like:
+#   scsi0: local-lvm:vm-<VMID>-disk-0,size=8G
+# Adjust the storage name (`local-lvm`) to whatever your Proxmox host
+# uses (`local-zfs`, `local-btrfs`, etc).
+# scsi0: local-lvm:vm-<VMID>-disk-0,size=8G
+
+scsihw: virtio-scsi-pci
+boot: order=scsi0
+ostype: l26
+
+# ---- guest agent ----
+# deputyOS bakes qemu-guest-agent into every qemu-aarch64/qemu-x86_64
+# image; enable it on the Proxmox side too so live snapshots and
+# graceful shutdowns work.
+agent: 1
+
+# ---- serial ----
+# A virtual serial port lets `qm terminal <vmid>` reach the guest's
+# serial-getty (which deputyOS enables). Useful for first-boot
+# debugging.
+serial0: socket
+vga: serial0
+
+# ---- onboot / startup ordering ----
+# Proxmox can auto-start deputyOS at host boot. Off by default; flip
+# to 1 if you want it.
+onboot: 0

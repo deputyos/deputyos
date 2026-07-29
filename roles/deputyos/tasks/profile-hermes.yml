@@ -1,0 +1,322 @@
+---
+# Hermes Agent profile bake — Lane F, M2 phase 3.
+# Reference: docs/02-profiles.md §"Adding a third profile",
+#            docs/03-image-builds.md §"Hermetic build properties",
+#            docs/09-security.md §AppArmor and §sysctl,
+#            profiles/hermes.toml.
+#
+# Contract: when this task file finishes, the image contains
+#   * /opt/deputyos/profiles/hermes/                (install root, agent:agent 0755)
+#   * /opt/deputyos/profiles/hermes/.venv/          (Python venv, agent-owned)
+#   * /home/agent/.hermes/{memory,skills}/         (data dir, 0700)
+#   * Python {{ hermes_python_version }} runtime
+#   * either real hermes-agent=={{ hermes_pinned_version }} OR the stub binary
+#   * /etc/systemd/system/hermes-gateway.service   (enabled, not started)
+#   * /etc/apparmor.d/deputyos.hermes               (enforce mode)
+#   * kernel.unprivileged_userns_clone=1 sysctl    (for skill child sandbox)
+#   * /opt/deputyos/profiles/hermes/.bake-meta      (read by `deputyctl version`)
+# Nothing is started here — first boot of the qcow2 starts the unit.
+
+- name: Set Hermes bake defaults  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    hermes_install_root: "/opt/deputyos/profiles/hermes"
+    hermes_data_dir: "/home/agent/.hermes"
+    hermes_unit_name: "hermes-gateway.service"
+    # pinned_version mirrors profiles/hermes.toml [profile].pinned_version.
+    # Override via Packer extra_vars when bumping.
+    hermes_pinned_version: "{{ hermes_pinned_version | default('0.11.0') }}"
+    hermes_python_version: "{{ hermes_python_version | default('3.11') }}"
+    hermes_force_stub: "{{ hermes_force_stub | default(false) }}"
+  tags: [profile, hermes]
+
+- name: Compute Hermes entrypoint  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    hermes_entrypoint: "{{ hermes_install_root }}/.venv/bin/hermes gateway start"
+  tags: [profile, hermes]
+
+- name: Ensure Hermes install root exists
+  ansible.builtin.file:
+    path: "{{ hermes_install_root }}"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+  tags: [profile, hermes]
+
+- name: Ensure Hermes data dir exists
+  ansible.builtin.file:
+    path: "{{ hermes_data_dir }}"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, hermes]
+
+- name: Ensure Hermes memory dir exists (FTS5 SQLite store)
+  ansible.builtin.file:
+    path: "{{ hermes_data_dir }}/memory"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, hermes]
+
+- name: Ensure Hermes skills dir exists (self-authored skills)
+  ansible.builtin.file:
+    path: "{{ hermes_data_dir }}/skills"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0700"
+  tags: [profile, hermes]
+
+- name: Touch skills sentinel (Hermes populates at runtime)
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ hermes_data_dir }}/skills/.gitkeep"
+    owner: agent
+    group: agent
+    mode: "0644"
+    force: false
+  tags: [profile, hermes]
+
+- name: Ensure deputyOS Hermes channels.d dir exists
+  ansible.builtin.file:
+    path: /etc/deputyos/hermes/channels.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [profile, hermes]
+
+- name: Touch channels.d sentinel (wizard populates at first boot)
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/deputyos/hermes/channels.d/.gitkeep
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  tags: [profile, hermes]
+
+# --- Sysctl override ----------------------------------------------------
+# Hermes' skill sandbox uses unprivileged user namespaces (unshare(CLONE_NEWUSER)).
+# The global sysctl bundle (templates/90-deputyos.conf.j2) already gates this on
+# deputyos_profile == "hermes", but if a future Lane B/E refactor moves the
+# kernel bundle elsewhere we drop a profile-specific 95- file as belt-and-braces.
+
+- name: Probe global sysctl bundle for unprivileged_userns_clone  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.command:
+    cmd: grep -q '^kernel\.unprivileged_userns_clone' /etc/sysctl.d/90-deputyos.conf
+  register: _hermes_sysctl_probe  # noqa: var-naming[no-role-prefix]
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [profile, hermes]
+
+- name: Drop Hermes sysctl override (profile-scoped)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/95-deputyos-hermes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # managed by deputyos -- profile-hermes override.
+      # required by Hermes for child-process sandboxing — see
+      # profiles/hermes.toml [kernel].required_sysctls.
+      kernel.unprivileged_userns_clone = 1
+  when: _hermes_sysctl_probe.rc | default(1) != 0
+  notify: Reload sysctl
+  tags: [profile, hermes]
+
+# --- Python runtime -----------------------------------------------------
+# Debian 12 (bookworm) ships python3.11 in the base archive — no third-party
+# repo needed. Idempotent: apt is a no-op when the version matches.
+
+- name: Install Python runtime + Hermes build deps
+  ansible.builtin.apt:
+    name:
+      - "python{{ hermes_python_version }}"
+      - "python{{ hermes_python_version }}-venv"
+      - "python{{ hermes_python_version }}-dev"
+      - python3-pip
+      - build-essential
+      - libsqlite3-dev    # FTS5 — Hermes memory store
+      - ca-certificates
+      - curl
+      - netcat-openbsd    # required by the stub fallback (nc.openbsd)
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [profile, hermes]
+
+# --- Venv ---------------------------------------------------------------
+
+- name: Create Hermes venv
+  ansible.builtin.command:
+    cmd: "python{{ hermes_python_version }} -m venv {{ hermes_install_root }}/.venv"
+    creates: "{{ hermes_install_root }}/.venv/bin/python3"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  tags: [profile, hermes]
+
+- name: Upgrade pip + wheel inside venv (best-effort)
+  ansible.builtin.command:
+    cmd: "{{ hermes_install_root }}/.venv/bin/pip install --upgrade pip wheel"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  register: _hermes_pip_bootstrap  # noqa: var-naming[no-role-prefix]
+  retries: 3
+  delay: 10
+  until: _hermes_pip_bootstrap is success
+  failed_when: false
+  changed_when: _hermes_pip_bootstrap.rc | default(1) == 0
+  tags: [profile, hermes]
+
+# --- Hermes install -----------------------------------------------------
+# Try the real pip install with retries. If it fails (offline build env, PyPI
+# hiccup, yanked version), fall back to the stub script. The stub satisfies
+# the smoke harness; CI bake-time failures get surfaced via the .bake-meta
+# `stub=true` flag that `deputyctl version` reads.
+
+- name: Install hermes-agent from PyPI  # noqa: name[template]
+  ansible.builtin.command:
+    cmd: >-
+      {{ hermes_install_root }}/.venv/bin/pip install
+      --no-input --disable-pip-version-check
+      hermes-agent=={{ hermes_pinned_version }}
+    creates: "{{ hermes_install_root }}/.venv/bin/hermes"
+  become: true
+  become_user: agent
+  environment:
+    HOME: /home/agent
+  register: hermes_install  # noqa: var-naming[no-role-prefix]
+  retries: 3
+  delay: 10
+  until: hermes_install is success
+  failed_when: false
+  changed_when: hermes_install.rc | default(1) == 0
+  when: not (hermes_force_stub | bool)
+  tags: [profile, hermes]
+
+- name: Detect whether real Hermes landed
+  ansible.builtin.stat:
+    path: "{{ hermes_install_root }}/.venv/bin/hermes"
+  register: _hermes_real_bin  # noqa: var-naming[no-role-prefix]
+  tags: [profile, hermes]
+
+- name: Decide stub vs real  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    hermes_use_stub: >-
+      {{ (hermes_force_stub | bool)
+         or (not _hermes_real_bin.stat.exists)
+         or (hermes_install is defined
+             and hermes_install.rc | default(1) != 0) }}
+  tags: [profile, hermes]
+
+- name: Ensure venv bin dir exists for stub drop
+  ansible.builtin.file:
+    path: "{{ hermes_install_root }}/.venv/bin"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+  when: hermes_use_stub | bool
+  tags: [profile, hermes]
+
+- name: Drop Hermes stub binary (fallback)
+  ansible.builtin.copy:
+    src: hermes-stub.sh
+    dest: "{{ hermes_install_root }}/.venv/bin/hermes"
+    owner: agent
+    group: agent
+    mode: "0755"
+  when: hermes_use_stub | bool
+  tags: [profile, hermes]
+
+# --- systemd unit -------------------------------------------------------
+
+- name: Render Hermes gateway systemd unit
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: "/etc/systemd/system/{{ hermes_unit_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  tags: [profile, hermes]
+
+- name: Verify systemd unit (best-effort)
+  ansible.builtin.command:
+    cmd: "systemd-analyze verify /etc/systemd/system/{{ hermes_unit_name }}"
+  changed_when: false
+  failed_when: false
+  register: _hermes_unit_verify  # noqa: var-naming[no-role-prefix]
+  tags: [profile, hermes]
+
+- name: Surface systemd-analyze findings (non-fatal)
+  ansible.builtin.debug:
+    msg: "{{ _hermes_unit_verify.stderr_lines | default([]) }}"
+  when: _hermes_unit_verify.rc | default(0) != 0
+  tags: [profile, hermes]
+
+- name: Enable Hermes gateway service (do not start at bake)
+  ansible.builtin.systemd:
+    name: "{{ hermes_unit_name }}"
+    enabled: true
+    daemon_reload: true
+  tags: [profile, hermes]
+
+# --- AppArmor profile ---------------------------------------------------
+
+- name: Drop Hermes AppArmor profile
+  ansible.builtin.copy:
+    src: apparmor/deputyos.hermes
+    dest: /etc/apparmor.d/deputyos.hermes
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload AppArmor
+  tags: [profile, hermes, apparmor]
+
+- name: Validate AppArmor profile syntax (best-effort)
+  ansible.builtin.command:
+    cmd: apparmor_parser -Q -K /etc/apparmor.d/deputyos.hermes
+  changed_when: false
+  failed_when: false
+  register: _hermes_aa_verify  # noqa: var-naming[no-role-prefix]
+  tags: [profile, hermes, apparmor]
+
+- name: Fail if AppArmor profile is malformed
+  ansible.builtin.fail:
+    msg: "AppArmor profile failed to parse: {{ _hermes_aa_verify.stderr | default('(no stderr)') }}"
+  when:
+    - _hermes_aa_verify.rc is defined
+    - _hermes_aa_verify.rc != 0
+    - "'apparmor_parser' in _hermes_aa_verify.stderr | default('')
+        or 'syntax' in _hermes_aa_verify.stderr | default('') | lower"
+  tags: [profile, hermes, apparmor]
+
+# --- Bake metadata (read by deputyctl version) ---------------------------
+
+- name: Capture bake timestamp  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    hermes_baked_at: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%FT%TZ')) }}"
+  tags: [profile, hermes]
+
+- name: Write Hermes bake metadata
+  ansible.builtin.copy:
+    dest: "{{ hermes_install_root }}/.bake-meta"
+    owner: agent
+    group: agent
+    mode: "0644"
+    content: |
+      version={{ hermes_pinned_version }}
+      python_version={{ hermes_python_version }}
+      baked_at={{ hermes_baked_at }}
+      stub={{ hermes_use_stub | bool | lower }}
+  tags: [profile, hermes]

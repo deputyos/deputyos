@@ -1,0 +1,56 @@
+---
+# Air-gapped LLM bundles. Tier-specific defaults baked at build time.
+#
+# All GGUFs are SHA-pinned. Build hosts fetch from a verified mirror once
+# and cache locally; CI gates verify the SHA before the file lands in the
+# image. Devices never touch the network for these.
+#
+# Sizes are uncompressed Q4_K_M for capacity planning.
+
+deputyos_airgap_models_root: "/var/lib/deputyos/models"
+deputyos_airgap_catalog_path: "/opt/deputyos/airgap/models/catalog.json"
+# Directory holding per-instance env files consumed by the
+# deputyos-llamacpp@.service template (LLAMACPP_PORT + LLAMACPP_MODEL_FILE).
+# Sits next to the catalog so bake-time drops and runtime `deputyctl model
+# register` writes land in the same place. Kept as a var so the template and
+# the bake task agree on the path.
+deputyos_airgap_env_dir: "/opt/deputyos/airgap/models"
+deputyos_airgap_llamacpp_port_base: 8090
+
+# Per-tier default model. variant-*.yml may further refine (e.g. rpi4 stays
+# on lean even when TIER=standard is requested, because the SoC can't run
+# 1.2B at usable t/s).
+deputyos_airgap_llm_by_tier:
+  lean:
+    - id: "LFM2-350M"
+      filename: "LFM2-350M-Q4_K_M.gguf"
+      sha256: "a4d000c7064bd3b2e42c6845836286a899a4e79cf1791da1a6797b58d575957d"
+      size_mb: 250
+      url: "https://huggingface.co/LiquidAI/LFM2-350M-GGUF/resolve/main/LFM2-350M-Q4_K_M.gguf"
+      port: 8090
+      default: true
+  standard:
+    - id: "LFM2-1.2B"
+      filename: "LFM2-1.2B-Q4_K_M.gguf"
+      sha256: "55175400e3f509a9616227afeffd58d87e80b9f628a5d3d54ada884d85221fed"
+      size_mb: 750
+      url: "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q4_K_M.gguf"
+      port: 8090
+      default: true
+  rich:
+    - id: "LFM2-2.6B"
+      filename: "LFM2-2.6B-Q4_K_M.gguf"
+      sha256: "384bc877b6c37064982f96885bef69e4475919f5969218ed4e3b9399ae0340df"
+      size_mb: 1600
+      url: "https://huggingface.co/LiquidAI/LFM2-2.6B-GGUF/resolve/main/LFM2-2.6B-Q4_K_M.gguf"
+      port: 8090
+      default: true
+    - id: "Qwen2.5-Coder-1.5B"
+      filename: "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+      sha256: "f530705d447660a4336c329981af164b471b60b974b1d808d57e8ec9fe23b239"
+      size_mb: 1000
+      # yamllint disable rule:line-length
+      url: "https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+      # yamllint enable rule:line-length
+      port: 8091
+      default: false

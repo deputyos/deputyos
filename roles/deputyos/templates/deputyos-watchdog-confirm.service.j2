@@ -1,0 +1,23 @@
+[Unit]
+Description=Confirm a pending deputyOS update after agent health succeeds
+Documentation=https://docs.deputyos.com/operations/update-and-rollback/
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=5min
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/deputyctl --internal-watchdog-confirm
+Restart=on-failure
+RestartSec=30
+User=root
+Group=root
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/deputyos /etc/deputyos
+
+[Install]
+WantedBy=multi-user.target

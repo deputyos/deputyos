@@ -1,0 +1,90 @@
+# Khoj profile manifest.
+# Read by `deputyctl` at runtime; consumed by the image build pipeline at bake time.
+# This file describes what is *already in the image* — there is no install step at boot.
+#
+# Khoj fits the OpenClaw/Hermes profile class:
+#   * multi-channel gateway     — web chat, Telegram, WhatsApp (Twilio), Obsidian, Emacs, desktop
+#   * persistent memory         — SQLite + embedded vector store; chat history per conversation
+#   * skill / tool system       — agent personas with tools (online search, document Q&A, code, image)
+#
+# Upstream: https://github.com/khoj-ai/khoj (MIT)
+
+[profile]
+id              = "khoj"
+display_name    = "Khoj"
+upstream_repo   = "khoj-ai/khoj"
+release_channel = "stable"
+min_ram_mb      = 4096            # honest: Khoj loads embeddings + chat models; 4GB is the floor
+pinned_version  = "1.32.0"        # bumped by the release-tracker bot
+
+[paths]
+install_root    = "/opt/deputyos/profiles/khoj"
+data_dir        = "/home/agent/.khoj"
+binary          = "/opt/deputyos/profiles/khoj/.venv/bin/khoj"
+
+[runtime]
+# Declared so `deputyctl doctor` can verify versions, not so anything is installed.
+language        = "python"
+python_version  = "3.11"
+package_manager = "pip"
+extra_apt       = []              # baked into the image, not installed at boot
+
+[service]
+unit            = "khoj-gateway.service"
+entrypoint      = "khoj --no-gui --host 127.0.0.1 --port 42110"
+ports           = [42110]
+
+[health]
+http_check      = "http://127.0.0.1:42110/api/health"
+journal_unit    = "khoj-gateway.service"
+startup_grace_s = 45              # embeddings + index warmup is heavier than Hermes/OpenClaw
+
+[apparmor]
+profile         = "/etc/apparmor.d/deputyos.khoj"
+
+[wizard]
+# Order in which the wizard collects answers for this profile.
+prompts = [
+  "model_provider",
+  "channels",
+  "gateway_allowlist",
+  "backup_destination",
+]
+
+[channels]
+# Channels Khoj actually serves upstream. The wizard asks the user which to enable; ufw
+# rules and AppArmor mediations are tightened to only the chosen subset.
+# Note: WhatsApp ships via Twilio integration; "desktop" is the local desktop client
+# talking to this gateway over loopback; "obsidian" + "emacs" are plugins that hit the
+# same /api over LAN/loopback.
+supported = [
+  "web", "telegram", "whatsapp-twilio", "obsidian", "emacs", "desktop",
+]
+
+[memory]
+# Khoj keeps chat sessions + the document index in a SQLite DB (Django ORM) plus an
+# embedded vector store on disk under data_dir. We pick SQLite for M7 acceptance —
+# Khoj's docker-compose default uses Postgres+pgvector, but SQLite is fully supported
+# and keeps the appliance "batteries-included" (no separate database service).
+session_db      = "~/.khoj/khoj.sqlite"
+backup_strategy = "rclone-sync"
+
+[upgrade]
+# When the release tracker sees a new upstream tag, the build pipeline produces a new
+# image rev. The user applies it via `deputyctl update`; data_dir is preserved.
+preserve_dirs   = ["~/.khoj"]
+post_upgrade_hooks = ["deputyctl doctor"]
+
+[egress]
+default_allow_hosts = [
+    "api.openai.com",
+    "api.anthropic.com",
+    "openrouter.ai",
+    "api.telegram.org",
+]
+
+
+# M4.5 Lane F: on an air-gapped build (AIRGAP=1), the wizard pre-selects this
+# local LLM provider so the baked LFM2 is chosen automatically without an API key.
+[airgap]
+default_provider = "local-llamacpp-airgap"

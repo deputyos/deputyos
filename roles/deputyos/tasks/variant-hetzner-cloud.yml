@@ -1,0 +1,53 @@
+---
+# Hetzner Cloud variant — cloud-init-recipe target (no custom snapshot).
+#
+# We do NOT build a Hetzner-specific image artefact. The user creates a
+# stock Ubuntu 24.04 server on Hetzner and pastes cloud-init/hetzner.yaml
+# into the User-Data field; cloud-init runs the deputyOS installer at
+# first boot and the role tasks below execute via that path.
+#
+# This file therefore runs in two contexts:
+#   1. CI / lint — `ansible-lint` validates the file independently of any
+#      Packer build. There is no `packer/hetzner-cloud.pkr.hcl`.
+#   2. First-boot on a real Hetzner Cloud server — cloud-init invokes the
+#      installer, which extracts the role bundle and runs this variant.
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — hetzner-cloud row.
+#   docs/14-limitations.md    §"hetzner / vultr / linode" — full re-image
+#                              cycles for updates; no signed image; user
+#                              reads the recipe before applying.
+
+- name: Set hetzner-cloud facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    # CX22 (Arm Ampere, 4 GB) and CX21 (x86, 4 GB) are the realistic
+    # entry-level shapes; both clear the standard tier.
+    deputyos_target_ram_mb: 4096
+    deputyos_target_storage_class: "block"
+    deputyos_cloud: "hetzner"
+
+- name: Ensure cloud-init is present
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present
+
+- name: Install hc-utils (Hetzner Cloud guest tools) — best-effort
+  # Hetzner does not ship a specific guest agent; the kernel's virtio
+  # drivers and cloud-init cover everything. We keep this task as a
+  # placeholder so future tooling has an obvious slot.
+  ansible.builtin.debug:
+    msg: "Hetzner Cloud uses stock virtio + cloud-init; no guest agent install required."
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"

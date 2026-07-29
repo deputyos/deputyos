@@ -1,0 +1,63 @@
+---
+# Fly Machines variant — OCI artefact target.
+#
+# The product is a Containerfile + fly.toml in fly/. A user runs
+# `flyctl deploy` against fly/fly.toml.example (or their own derived
+# fly.toml). This role file runs at *image build time* inside the
+# container (see fly/Containerfile's ansible-playbook step), not at
+# first boot, because Fly Machines images are immutable.
+#
+# Reference:
+#   docs/03-image-builds.md   §"build matrix" — fly-machines row.
+#   docs/14-limitations.md    §"fly-machines": ephemeral storage,
+#                              cold-start latency, voice disabled.
+#
+# Container-environment caveats (intentional deviations from baseline):
+#   * No systemd inside the container. The agent is the container's
+#     PID 1 (see fly/Containerfile ENTRYPOINT). `deputyctl up` on this
+#     target therefore execs the agent in the foreground rather than
+#     poking systemd. Documented in fly/README.md.
+#   * AppArmor: enforcement requires --privileged or specific capability
+#     drops Fly's default machine config doesn't grant. Profiles are
+#     installed in *complain* mode; switch to enforce only if the user
+#     deploys to a machine with the required capabilities.
+#   * No clamd daemon: container backgrounding is fragile and Fly's free
+#     tier doesn't have RAM headroom for clamd's ~900 MB RSS. On-demand
+#     `clamscan` triggered by Magika hints stays the same as Pi 4 4GB.
+
+- name: Set fly-machines facts
+  ansible.builtin.set_fact:
+    # No persistent daemon — see header. On-demand clamscan replaces it.
+    deputyos_clamav_daemon_enabled: false
+    # Fly's smallest "shared-cpu-1x" machines top out at 256 MB and 1 GB.
+    # 2 GB is the realistic floor for deputyOS (Node + Python + Camoufox).
+    deputyos_target_ram_mb: 2048
+    # Fly volume = block storage, but ephemeral if the volume is deleted.
+    # See docs/14-limitations.md §"fly-machines".
+    deputyos_target_storage_class: "block"
+    deputyos_cloud: "fly"
+    # AppArmor: the security baseline normally enables enforce mode; here
+    # we leave the profiles installed but unloaded. The container's
+    # entrypoint runs as PID 1 without a systemd graph, so handler-based
+    # apparmor reloads don't apply at first boot anyway.
+    deputyos_apparmor_mode: "complain"
+
+- name: "Note: container-mode build (no systemd, no daemons)"
+  ansible.builtin.debug:
+    msg: >-
+      fly-machines variant: container PID 1 = agent. systemd unit
+      installation is skipped at build time; entrypoint runs the agent
+      in the foreground per fly/Containerfile.
+
+- name: Verify deputyctl is on PATH
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"

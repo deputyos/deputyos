@@ -1,0 +1,119 @@
+---
+# Bake LFM2 GGUF + llama.cpp service when AIRGAP=1.
+#
+# vars/llm-airgap.yml carries the per-tier model list. Models are staged on
+# the Packer host by scripts/build.sh into deputyos_staging_dir/llm/ with a
+# verified sha256, then copied into the image.
+#
+# llama.cpp is already built by the standard tier; we only add per-model
+# systemd units (`deputyos-llamacpp@<id>.service`) and the catalog file.
+
+# Self-gates via the block `when:` below. When deputyos_airgap is false
+# (the default), every task in this file is a no-op AND the play continues
+# to the subsequent main.yml imports (voice-baseline, watchdog, the per-
+# target variant tuning, and the profile bake). Do NOT use `meta: end_play`
+# here — that ends the *entire* play and skips the profile bake (+ variant
+# tuning + watchdog) for every AIRGAP=0 build. Same fix as airgap-baseline.yml.
+- name: Llm-airgap | bake airgap LLM models (no-op unless AIRGAP=1)
+  when: deputyos_airgap | bool
+  block:
+    - name: Llm-airgap | load tier-specific model list
+      ansible.builtin.include_vars: llm-airgap.yml
+
+    - name: Llm-airgap | resolve baked model list for this tier
+      ansible.builtin.set_fact:
+        deputyos_airgap_models: "{{ deputyos_airgap_llm_by_tier[deputyos_tier] | default([]) }}"
+
+    - name: Llm-airgap | refuse to airgap-bake unsupported tier
+      ansible.builtin.assert:
+        that: deputyos_airgap_models | length > 0
+        fail_msg: >-
+          AIRGAP=1 + TIER={{ deputyos_tier }} has no LFM2 default in
+          vars/llm-airgap.yml. Either pick a known tier (lean, standard, rich)
+          or extend deputyos_airgap_llm_by_tier.
+
+    - name: Llm-airgap | ensure model directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - "{{ deputyos_airgap_models_root }}"
+        - "/opt/deputyos/airgap/models"
+
+    - name: Llm-airgap | copy each baked GGUF into the device
+      ansible.builtin.copy:
+        src: "{{ deputyos_staging_dir }}/llm/{{ item.filename }}"
+        dest: "{{ deputyos_airgap_models_root }}/{{ item.filename }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ deputyos_airgap_models }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Llm-airgap | verify SHA256 of each baked GGUF
+      ansible.builtin.stat:
+        path: "{{ deputyos_airgap_models_root }}/{{ item.filename }}"
+        checksum_algorithm: sha256
+      register: deputyos_airgap_gguf_stat
+      loop: "{{ deputyos_airgap_models }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Llm-airgap | refuse to ship a model whose SHA does not match vars/llm-airgap.yml
+      ansible.builtin.assert:
+        that:
+          - item.stat.checksum == item.item.sha256
+        fail_msg: >-
+          SHA mismatch for {{ item.item.id }}: expected {{ item.item.sha256 }},
+          got {{ item.stat.checksum }}. Refusing to bake.
+      loop: "{{ deputyos_airgap_gguf_stat.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: Llm-airgap | drop catalog.json so `deputyctl model list` works offline
+      ansible.builtin.copy:
+        dest: "{{ deputyos_airgap_catalog_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {
+            "$schema": "https://www.deputyos.com/schemas/airgap-models-v1.json",
+            "tier": "{{ deputyos_tier }}",
+            "models": {{ deputyos_airgap_models | to_nice_json }}
+          }
+
+    - name: Llm-airgap | drop per-instance env file for each baked model
+      ansible.builtin.copy:
+        dest: "{{ deputyos_airgap_env_dir }}/{{ item.id }}.env"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          LLAMACPP_PORT={{ item.port }}
+          LLAMACPP_MODEL_FILE={{ item.filename }}
+      loop: "{{ deputyos_airgap_models }}"
+      loop_control:
+        label: "{{ item.id }}.env"
+
+    - name: Llm-airgap | install per-model systemd unit template
+      ansible.builtin.template:
+        src: deputyos-llamacpp@.service.j2
+        dest: /etc/systemd/system/deputyos-llamacpp@.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Llm-airgap | enable the default model unit at boot
+      ansible.builtin.systemd:
+        name: >-
+          deputyos-llamacpp@{{ (deputyos_airgap_models |
+          selectattr('default', 'true') | list | first).id }}.service
+        enabled: true
+        state: stopped
+        daemon_reload: true
+      when: ansible_facts.service_mgr == "systemd"

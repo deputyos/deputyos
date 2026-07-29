@@ -1,0 +1,143 @@
+---
+# Generic arm64 SBC variant — best-effort target.
+# Reference: docs/03-image-builds.md §"Per-target tuning highlights"
+# (arm64-generic column) and docs/14-limitations.md §"arm64-generic".
+#
+# This variant covers Radxa, Orange Pi, Khadas, Le Potato, and the long
+# tail of arm64 SBCs that aren't Raspberry Pi. The base is the stock
+# Debian 12 arm64 cloud image (NOT pi-gen) so the kernel is mainline,
+# the userland is plain Debian, and per-board quirks (device-tree
+# overlays, audio routing, video output, thermal envelope) are the
+# user's responsibility — the first-boot wizard collects the overlay.
+#
+# No bake-time per-board work is attempted. Lint must pass and
+# `ansible-playbook --syntax-check` with hw=arm64-generic must succeed.
+
+- name: Set arm64-generic facts
+  ansible.builtin.set_fact:
+    # docs/14 doesn't explicitly forbid clamd for arm64-generic; assume
+    # 4GB+ which is the floor for a "modern" arm64 SBC. The runtime
+    # check in deputyctl doctor will disable clamd if RAM is actually
+    # below threshold.
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 4096
+    # Hopeful default — most arm64 SBC users put a SATA/NVMe SSD on the
+    # board. SD-card users override at first boot. Worst-case the limits
+    # JSON (storage_class) gets corrected on first run.
+    deputyos_target_storage_class: "ssd"
+
+# AppArmor cmdline injection — the kernel-cmdline path varies by board:
+#   - Raspberry-Pi-style boards mount firmware at /boot/firmware and
+#     read /boot/firmware/cmdline.txt
+#   - Many Allwinner / Rockchip / Amlogic boards use U-Boot extlinux
+#     and read /boot/extlinux/extlinux.conf
+#   - Older / simpler boards put cmdline.txt at /boot/cmdline.txt
+# We try each in order; if none exist we log a clear warning and let
+# the bake continue. The user must add the cmdline manually for their
+# board (this is a "best-effort" target — see docs/14).
+- name: Detect kernel cmdline file
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /boot/firmware/cmdline.txt
+    - /boot/cmdline.txt
+    - /boot/extlinux/extlinux.conf
+  register: deputyos_arm64_cmdline_probe
+  changed_when: false
+
+- name: Pick the first cmdline file that exists
+  ansible.builtin.set_fact:
+    deputyos_arm64_cmdline_path: >-
+      {{ (deputyos_arm64_cmdline_probe.results
+          | selectattr('stat.exists', 'equalto', true)
+          | map(attribute='item')
+          | list
+          | first) | default('') }}
+
+- name: Add AppArmor flags to detected cmdline (cmdline.txt-style)
+  ansible.builtin.replace:
+    path: "{{ deputyos_arm64_cmdline_path }}"
+    regexp: '^(.*?)(\s*)$'
+    replace: '\1 apparmor=1 security=apparmor\2'
+  when:
+    - deputyos_arm64_cmdline_path != ''
+    - deputyos_arm64_cmdline_path is search('cmdline.txt$')
+
+- name: Add AppArmor flags to detected extlinux.conf
+  # extlinux.conf has APPEND lines; we add to each. This is a coarse
+  # match — a hand-tuned board config will need manual review.
+  ansible.builtin.replace:
+    path: "{{ deputyos_arm64_cmdline_path }}"
+    regexp: '^(\s*APPEND\s+.+?)(\s*)$'
+    replace: '\1 apparmor=1 security=apparmor\2'
+  when:
+    - deputyos_arm64_cmdline_path != ''
+    - deputyos_arm64_cmdline_path is search('extlinux\\.conf$')
+
+- name: Warn loudly when no kernel-cmdline file was found
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: arm64-generic bake could not find a kernel-cmdline file
+      (tried /boot/firmware/cmdline.txt, /boot/cmdline.txt,
+      /boot/extlinux/extlinux.conf). AppArmor flags were NOT injected.
+      Add `apparmor=1 security=apparmor` to your board's bootloader
+      cmdline manually before relying on the security baseline.
+  when: deputyos_arm64_cmdline_path == ''
+
+- name: Install cpufrequtils
+  ansible.builtin.apt:
+    name: cpufrequtils
+    state: present
+
+- name: Set CPU governor to ondemand
+  ansible.builtin.copy:
+    dest: /etc/default/cpufrequtils
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos. Generic arm64 SBC — no specific A-core
+      # tuning available; ondemand is the safe default.
+      GOVERNOR="ondemand"
+
+- name: Enable cpufrequtils
+  ansible.builtin.service:
+    name: cpufrequtils
+    enabled: true
+
+# No firmware blobs bundled (docs/03 row). Mainline arm64 kernel from
+# the Debian base is what the user gets; vendor blobs (Mali GPU,
+# specific WiFi firmware) are NOT installed at bake time.
+
+- name: Drop wifi-power-save-off oneshot unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/deputyos-wifi-powersave-off.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by deputyos.
+      [Unit]
+      Description=deputyOS — disable WiFi power-save
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/sh -c 'for f in /sys/class/net/wl*/device/power/control; \
+        do [ -e "$f" ] && echo on > "$f"; done; true'
+      RemainAfterExit=true
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable wifi-power-save-off oneshot
+  ansible.builtin.systemd:
+    name: deputyos-wifi-powersave-off.service
+    enabled: true
+    daemon_reload: true
+
+# TODO(M6): U-Boot bootcount A/B. Most arm64 SBCs use U-Boot; same
+# bootcount mechanism as Pi 4. Single-slot image for now.
+- name: Note U-Boot bootcount A/B is M6
+  ansible.builtin.debug:
+    msg: "U-Boot + bootcount A/B for arm64-generic deferred to M6 (see docs/08-update-rollback.md)"

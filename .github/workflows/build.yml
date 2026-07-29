@@ -1,0 +1,57 @@
+---
+# Matrix build for desktop launcher binaries (M2.5).
+# Builds all 5 platform triples on push to main or manual trigger.
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deputyos-desktop/**"
+      - "deputyctl/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "deputyos-desktop/**"
+      - "deputyctl/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+jobs:
+  desktop-launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - triple: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - triple: x86_64-pc-windows-msvc
+            os: windows-latest
+          - triple: x86_64-apple-darwin
+            os: macos-latest
+          - triple: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Match rust-toolchain.toml. Installing targets only on the moving
+          # `stable` toolchain leaves Cargo's pinned toolchain without them.
+          toolchain: "1.91.1"
+          targets: ${{ matrix.triple }}
+      - name: Install Linux cross linker
+        if: matrix.triple == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build launcher
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build -p deputyos-desktop --release --target ${{ matrix.triple }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deputyos-desktop-${{ matrix.triple }}
+          path: target/${{ matrix.triple }}/release/deputyos-desktop*

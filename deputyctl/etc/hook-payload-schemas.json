@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://www.deputyos.com/schemas/hook-payloads/v1.json",
+  "title": "deputyOS hook payload schemas",
+  "description": "JSON Schemas for the four hook kinds documented in docs/11-roadmap.md §M7. Hook scripts under /etc/deputyos/hooks.d/<kind>/ receive one of these payloads on stdin (compact JSON, one object). The dispatcher kills any script that runs longer than 5 seconds and never propagates a non-zero exit to the calling code path; failures are logged with the script name, exit code, and a tail of stderr. See deputyctl/src/hooks.rs and deputyctl/src/message_relay.rs for the firing path.",
+  "definitions": {
+    "pre-message": {
+      "type": "object",
+      "title": "pre-message hook payload",
+      "description": "Fired by the agent (via the relay) before a user message is sent to the model. Hooks may short-circuit by exiting non-zero (the agent decides whether to honour that — deputyOS does not enforce blocking semantics; hooks are advisory).",
+      "required": ["timestamp", "channel", "user_id", "message"],
+      "additionalProperties": true,
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp at which the agent received the message."
+        },
+        "channel": {
+          "type": "string",
+          "description": "Source channel id (e.g. Slack channel id, web session id, CLI 'tty')."
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Stable identifier for the message author within the channel."
+        },
+        "message": {
+          "type": "string",
+          "description": "Raw message text, before any redaction or templating."
+        },
+        "model_provider": {
+          "type": "string",
+          "description": "Configured provider id (e.g. 'openrouter', 'anthropic')."
+        },
+        "model_id": {
+          "type": "string",
+          "description": "Provider-specific model identifier."
+        }
+      }
+    },
+    "post-message": {
+      "type": "object",
+      "title": "post-message hook payload",
+      "description": "Fired by the agent (via the relay) after a model response has been delivered to the user. Carries cost / latency telemetry; cost-alert hooks consume a separate kind.",
+      "required": ["timestamp", "channel", "user_id", "duration_ms"],
+      "additionalProperties": true,
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "channel": {"type": "string"},
+        "user_id": {"type": "string"},
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock ms from request to final-token delivery."
+        },
+        "tokens": {
+          "type": "object",
+          "description": "Provider-reported token accounting; absent if the provider does not return it.",
+          "properties": {
+            "input": {"type": "integer", "minimum": 0},
+            "output": {"type": "integer", "minimum": 0},
+            "total": {"type": "integer", "minimum": 0}
+          }
+        },
+        "cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Computed USD cost; deputyOS uses the provider's published pricing."
+        },
+        "model_provider": {"type": "string"},
+        "model_id": {"type": "string"}
+      }
+    },
+    "cost-alert": {
+      "type": "object",
+      "title": "cost-alert hook payload",
+      "description": "Fired by `cost::evaluate` (Lane M5) when a configured budget threshold is crossed. The threshold model and emission cadence are documented in docs/11-roadmap.md §M5.",
+      "required": ["timestamp", "threshold_usd", "spent_usd", "window"],
+      "additionalProperties": true,
+      "properties": {
+        "timestamp": {"type": "string", "format": "date-time"},
+        "threshold_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Budget that triggered the alert (e.g. daily cap)."
+        },
+        "spent_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cumulative USD spent in the current window when the alert fired."
+        },
+        "window": {
+          "type": "string",
+          "enum": ["hourly", "daily", "monthly"],
+          "description": "Aggregation window the threshold applies to."
+        },
+        "provider": {"type": "string"},
+        "level": {
+          "type": "string",
+          "enum": ["warning", "exceeded"],
+          "description": "warning = approaching threshold; exceeded = surpassed."
+        }
+      }
+    },
+    "update-applied": {
+      "type": "object",
+      "title": "update-applied hook payload",
+      "description": "Fired by `update::run_apply` after the staged image has been verified against the signed manifest. The A/B swap itself happens later (M6); this hook fires on the staging step so admin tooling can refresh dashboards / send notifications eagerly.",
+      "required": ["kind", "staged_at", "filename", "sha256", "release_version"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "update-applied"
+        },
+        "staged_at": {
+          "type": "string",
+          "description": "Absolute path of the staged artefact on this host."
+        },
+        "filename": {"type": "string"},
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "release_version": {
+          "type": "string",
+          "description": "Y.M.D release identifier from the signed manifest."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/definitions/pre-message"},
+    {"$ref": "#/definitions/post-message"},
+    {"$ref": "#/definitions/cost-alert"},
+    {"$ref": "#/definitions/update-applied"}
+  ]
+}

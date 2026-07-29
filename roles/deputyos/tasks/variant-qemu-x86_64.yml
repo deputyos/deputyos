@@ -1,0 +1,72 @@
+---
+# QEMU x86_64 variant — second CI smoke target. Mirrors
+# variant-qemu-aarch64.yml with x86_64-specific tweaks:
+#   - serial getty on ttyS0 (vs ttyAMA0 on arm64 'virt' machine)
+#   - GRUB cmdline edits to route kernel logs to ttyS0 so the smoke
+#     harness's serial log is useful for first-boot debugging
+#
+# Reference: docs/03-image-builds.md §"Per-target tuning highlights".
+
+- name: Set qemu-x86_64 facts
+  ansible.builtin.set_fact:
+    deputyos_clamav_daemon_enabled: true
+    deputyos_target_ram_mb: 4096
+    deputyos_target_storage_class: "ssd"
+
+- name: Install qemu-guest-agent
+  ansible.builtin.apt:
+    name: qemu-guest-agent
+    state: present
+
+- name: Enable qemu-guest-agent service
+  ansible.builtin.service:
+    name: qemu-guest-agent
+    enabled: true
+
+- name: Enable serial getty on ttyS0
+  # Headless QEMU smoke + first-boot wizard need a serial console.
+  # x86 uses ttyS0 (16550 UART), not ttyAMA0 (PL011 on arm 'virt').
+  ansible.builtin.systemd:
+    name: serial-getty@ttyS0.service
+    enabled: true
+    daemon_reload: true
+
+- name: Route kernel + early-userspace logs to serial
+  # Append `console=ttyS0,115200n8 console=tty0` to GRUB_CMDLINE_LINUX_DEFAULT
+  # so the smoke harness's `-serial file:...` capture has actual content.
+  # Idempotent: replaces the line whether or not console= is already present.
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet console=ttyS0,115200n8 console=tty0"'
+    create: false
+  register: deputyos_grub_cmdline
+
+- name: Regenerate GRUB config
+  # Inline run rather than handler — bake-time qcow2 is sealed, so we
+  # need the new grub.cfg in the artefact, not deferred.
+  ansible.builtin.command: update-grub
+  when: deputyos_grub_cmdline.changed   # noqa: no-handler
+  changed_when: true
+
+- name: Verify deputyctl is on PATH
+  # Defensive — security-baseline.yml installs it; this just asserts the
+  # smoke harness will find it. Not a state change.
+  ansible.builtin.stat:
+    path: /usr/local/bin/deputyctl
+  register: deputyos_deputyctl_installed
+  changed_when: false
+
+- name: Assert deputyctl is installed
+  ansible.builtin.assert:
+    that:
+      - deputyos_deputyctl_installed.stat.exists
+      - deputyos_deputyctl_installed.stat.executable
+    fail_msg: "deputyctl missing — security-baseline.yml did not install it"
+
+- name: Ensure cloud-init is present
+  # Debian cloud images ship cloud-init; this is belt-and-braces so a
+  # build against a non-cloud base still works.
+  ansible.builtin.apt:
+    name: cloud-init
+    state: present

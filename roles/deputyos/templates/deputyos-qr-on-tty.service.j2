@@ -1,0 +1,45 @@
+# Managed by deputyos. Rendered from
+# roles/deputyos/templates/deputyos-qr-on-tty.service.j2 by
+# tasks/wizard-baseline.yml. Reference: docs/01-getting-started.md
+# §"first boot UX".
+#
+# Prints the wizard URL and a scannable QR code on tty1 + the system
+# console at first boot, so a user with an HDMI display can point a
+# phone at the screen and reach the wizard without typing a URL.
+#
+# ASSUMPTION (cross-lane): Lane W is implementing
+#   `deputywizard print-qr`
+# as a subcommand that emits the wizard URL + QR to stdout. If the
+# final CLI flag differs (`qr`, `--qr`, etc.), this unit's ExecStart
+# needs adjusting — the orchestrator will reconcile.
+[Unit]
+Description=deputyOS first-boot QR code on TTY
+Documentation=https://github.com/dipankarn/deputyOS/blob/main/docs/01-getting-started.md
+After=deputywizard.service
+Requires=deputywizard.service
+# Same gate as the wizard itself: don't reprint the QR after first run.
+ConditionPathExists=!/var/lib/deputyos/wizard-state.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+# Print to tty1 (HDMI) and to the system console (serial / hypervisor
+# console). Best-effort: each redirection is its own command so a
+# missing tty (e.g. headless server) doesn't fail the unit.
+ExecStart=/bin/sh -c '/usr/local/bin/deputywizard print-qr > /dev/tty1 2>&1 || true'
+ExecStart=/bin/sh -c '/usr/local/bin/deputywizard print-qr > /dev/console 2>&1 || true'
+RemainAfterExit=true
+
+# Hardening — read-only is fine; the QR printer doesn't write anywhere.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
