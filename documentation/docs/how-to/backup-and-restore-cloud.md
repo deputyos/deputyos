@@ -97,6 +97,5 @@ listable, downloadable and deletable.
 
 ## Related
 
-- [Storage and backup architecture](../../../docs/06-storage-and-backup.md)
 - [Accounts threat model](../concepts/threat-model-accounts.md)
 - [Back up to your own bucket](backup-and-restore.md)

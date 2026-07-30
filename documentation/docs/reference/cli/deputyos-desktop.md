@@ -346,7 +346,7 @@ Download + verify + atomically replace **this launcher binary** from the
 manifest's `desktop_launchers[<host-triple>]` entry. The VM image is
 untouched. The new launcher takes effect on the next launch (the running
 process is never replaced in memory). See
-[desktop-launcher-internals § Launcher-binary self-update](../../distribution/desktop-launcher-internals.md#launcher-binary-self-update--deputyos-desktop-self-update)
+[desktop-launcher-internals § Launcher-binary self-update](../../distribution/desktop-launcher-internals.md#launcher-binary-self-update-deputyos-desktop-self-update)
 for the per-OS swap semantics and the security note.
 
 #### Synopsis
